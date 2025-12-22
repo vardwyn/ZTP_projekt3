@@ -1,0 +1,16 @@
+[project]
+name = "ZTP_projekt3"
+version = "0.0.0"
+description = "Analiza jakości powietrza wg. danych GIOŚ"
+requires-python = ">=3.10"
+readme = "README.md"
+
+dependencies = [
+  "pandas",
+  "numpy",
+  "matplotlib",
+  "requests",
+  "openpyxl",
+  "jupyter",
+  "ipykernel",
+]
