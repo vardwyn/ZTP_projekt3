@@ -13,4 +13,5 @@ dependencies = [
   "openpyxl",
   "jupyter",
   "ipykernel",
+  "pytest",
 ]
