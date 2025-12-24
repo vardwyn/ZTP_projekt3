@@ -1,46 +1,50 @@
 import pandas as pd
 import requests
 import zipfile
-import io, os
+import io
 import hashlib
 
-# id archiwum dla poszczególnych lat
-gios_archive_url = "https://powietrze.gios.gov.pl/pjp/archives/downloadFile/"
-gios_url_ids = {2014: '302', 2019: '322', 2024: '582'}
-gios_pm25_file = {2014: '2014_PM2.5_1g.xlsx', 2019: '2019_PM25_1g.xlsx', 2024: '2024_PM25_1g.xlsx'}
-gios_archive_sha256 = {
-    2014: "8cabcc2118f019d8d1c0998561c01d57eda8c0a4c531cd2158b18522cd1aed27",
-    2019: "777bc03c3c6d1ac77bd4353a80b6e064506368d42be19edece60f040c17dba1c",
-    2024: "571dfa56866388c2904284ca6029bbf6016af3905b95bcacc5b3b6f6fa2d00e1"
-}
-
 # funkcja do ściągania podanego archiwum
-def download_gios_archive(year):
-    gios_id = gios_url_ids[year]
-    gios_hash = gios_archive_sha256[year]
-    filename = gios_pm25_file[year]
-    
-    # Pobranie archiwum ZIP do pamięci
-    url = f"{gios_archive_url}{gios_id}"
-    response = requests.get(url)
-    response.raise_for_status()  # jeśli błąd HTTP, zatrzymaj
-    
-    actual_hash = hashlib.sha256(response.content).hexdigest()
-    if actual_hash != gios_hash.lower():
-        raise ValueError(f"SHA256 mismatch: {actual_hash}")
+def download_gios_archive(archive_url, filename, sha256=None):
+    """
+    Pobiera archiwum ZIP z danymi GIOŚ i wczytuje wskazany plik Excela.
 
-    # Otwórz zip w pamięci
+    Parametry:
+    - archive_url: pełny URL do archiwum ZIP (np. https://.../downloadFile/XXX)
+    - sha256: opcjonalny oczekiwany hash SHA-256 (hex) archiwum ZIP; jeśli None,
+      pomija weryfikację
+    - filename: nazwa pliku w archiwum ZIP; typowa (zwykle oczekiwana) nazwa to
+      <YEAR>_PM2.5_1g.xlsx
+    """
+    response = requests.get(archive_url)
+    response.raise_for_status()  # jeśli błąd HTTP, zatrzymaj
+
+    # Dla nieprawidłowych ścieżek serwer GIOS zwraca 200 OK jako text/html
+    # z prośbą o kontakt a administratorem w treści.
+    # Jako, że nie jest to 404 ten błąd zostaje propagowany za raise_for_status()
+    # Możemy poprzestać na wyjątku z zipfile podnoszący nieprawidłowy zip,
+    # ale możemy też rozpoznać ten przypadek jawnie
+    content_type = getattr(response, "headers", {}).get("Content-Type")
+    if content_type and "text/html" in content_type.lower():
+        raise ValueError(f"Nieprawidłowy Content-Type: {content_type}\nOczekiwany: application/zip")
+
+    if sha256: # skip check gdy nie podano hasha
+        actual_hash = hashlib.sha256(response.content).hexdigest()
+        if actual_hash.lower() != sha256.lower():
+            raise ValueError(f"SHA256 nieprawidłowy! Plik: {actual_hash}")
+
     with zipfile.ZipFile(io.BytesIO(response.content)) as z:
-        # znajdź właściwy plik z PM2.5
-        if not filename:
-            print(f"Błąd: nie znaleziono {filename}.")
-        else:
-            # wczytaj plik do pandas
-            with z.open(filename) as f:
-                try:
-                    df = pd.read_excel(f, header=None)
-                except Exception as e:
-                    print(f"Błąd przy wczytywaniu {year}: {e}")
+        if filename not in z.namelist():
+            raise FileNotFoundError(f"Nie znaleziono pliku {filename} w archiwum.")
+
+        with z.open(filename) as f:
+            try:
+                df = pd.read_excel(f, header=None)
+            except Exception as e:
+                raise RuntimeError(
+                    f"Błąd przy wczytywaniu pliku {filename} z archiwum."
+                ) from e
+
     return df
 
 
