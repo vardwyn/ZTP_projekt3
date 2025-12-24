@@ -15,3 +15,7 @@ dependencies = [
   "ipykernel",
   "pytest",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
