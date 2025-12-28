@@ -307,40 +307,36 @@ def update_station_names_data(data_df, code_mapping, label="measurements"):
     return data_df
 
 
-EXTRA_COLS = [
-    "Typ stacji",
-    "Typ obszaru",
-    "Rodzaj stacji",
-    "Województwo",
-    "Miejscowość",
-    "WGS84 φ N",
-    "WGS84 λ E",
-]
+def extend_metadata_with_station_info(metadata_df, updated_metadata, extra_cols, label="metadata"):
+    """
+    Rozszerza metadane stacji o dodatkowe kolumny z updated_metadata.
 
-
-def add_station_info(metadata_df, updated_metadata, label="metadata"):
+    Parametry:
+    - metadata_df: metadane stacji dla danego roku (z kolumną "Kod stacji")
+    - updated_metadata: pełne metadane referencyjne (z kolumną "Kod stacji")
+    - extra_cols: lista dodatkowych kolumn do dołączenia
+    """
 
     df = metadata_df.copy()
 
+    # Normalizacja kodów po obu stronach
     df["Kod stacji"] = df["Kod stacji"].astype(str).str.strip()
     upd = updated_metadata.copy()
     upd["Kod stacji"] = upd["Kod stacji"].astype(str).str.strip()
 
+    # Sprawdzenie spójności: wszystkie kody muszą istnieć w updated_metadata
     missing = set(df["Kod stacji"]) - set(upd["Kod stacji"])
     assert not missing, (
         f"[{label}] Some station codes in metadata_df are not in updated_metadata: "
         f"{sorted(missing)}"
     )
 
-    cols_to_use = ["Kod stacji"] + EXTRA_COLS
+    # Wybrane kolumny do dołączenia
+    cols_to_use = ["Kod stacji"] + list(extra_cols)
     extra = upd[cols_to_use]
 
+    # Dołącz dodatkowe informacje po kodzie stacji
     df = df.merge(extra, on="Kod stacji", how="left")
-
-    df = df.rename(columns={
-        "WGS84 φ N": "Szerokość geograficzna",
-        "WGS84 λ E": "Długość geograficzna",
-    })
 
     return df
 
