@@ -48,7 +48,16 @@ def download_gios_archive(archive_url, filename, sha256=None):
     return df
 
 
-def reformat_raw_dfs(raw_df, meta_keys=None):
+def split_raw_df_to_metadata_and_measurements(raw_df, meta_keys=None):
+    """
+    Dzieli surowy DataFrame z danymi GIOŚ na:
+    - metadane stacji (kolumny opisowe),
+    - pomiary (wiersze czasowe, kolumny = kody stacji).
+
+    Parametry:
+    - raw_df: surowy DataFrame w formacie GIOŚ (metadane w pierwszej kolumnie)
+    - meta_keys: lista etykiet wierszy uznawanych za metadane
+    """
     labels = raw_df.iloc[:, 0]
     data   = raw_df.iloc[:, 1:]
     
@@ -59,12 +68,23 @@ def reformat_raw_dfs(raw_df, meta_keys=None):
     stations.columns = labels[is_metadata].values
     
     measurements = data[is_datapoint.values]
-    measurements.index = pd.to_datetime(labels[is_datapoint].values)
+    measurements.index = pd.to_datetime(
+        labels[is_datapoint].values,
+        format="%Y-%m-%d %H:%M:%S",
+        errors="coerce",
+    )
     
-    station_codes = stations["Kod stacji"].values
+    if "Kod stacji" in stations.columns:
+        station_codes = stations["Kod stacji"].values
+    else:
+        station_codes = data.columns
     measurements = data[is_datapoint.values].copy()
     measurements.columns = station_codes
-    measurements.index = pd.to_datetime(labels[is_datapoint].values)
+    measurements.index = pd.to_datetime(
+        labels[is_datapoint].values,
+        format="%Y-%m-%d %H:%M:%S",
+        errors="coerce",
+    )
 
     return stations, measurements
 
