@@ -342,37 +342,50 @@ def extend_metadata_with_station_info(metadata_df, updated_metadata, extra_cols,
 
 
 def combine_metadata_frames(meta_dfs, code_col="Kod stacji"):
+    """
+    Łączy metadane z wielu lat, zachowując tylko wspólne stacje.
 
-    code_sets = []
+    Wykorzystuje złączenia typu inner na kolumnie code_col, aby znaleźć
+    kody obecne we wszystkich ramkach danych.
+    """
+
+    # Normalizacja kodów i diagnostyka liczby unikalnych stacji (bez kopiowania całych ramek)
+    code_dfs = []
     for i, df in enumerate(meta_dfs):
         codes = df[code_col].astype(str).str.strip()
-        s = set(codes)
-        print(f"[meta {i}] unique stations: {len(s)}")
-        code_sets.append(s)
+        print(f"[meta {i}] unikalne stacje: {codes.nunique()}")
+        code_dfs.append(codes.drop_duplicates().to_frame(code_col))
 
-    common_codes = set.intersection(*code_sets)
-    print(f"[meta] stations present in ALL years: {len(common_codes)}")
+    # Inner join na samym kodzie stacji => wspólne kody we wszystkich ramkach
+    common = code_dfs[0]
+    for df_codes in code_dfs[1:]:
+        common = common.merge(df_codes, on=code_col, how="inner")
 
+    common_codes = set(common[code_col])
+    print(f"[meta] stacje obecne we WSZYSTKICH latach: {len(common_codes)}")
+
+    # Zachowaj strukturę pierwszej ramki, ale tylko wspólne kody
     base = meta_dfs[0].copy()
     base[code_col] = base[code_col].astype(str).str.strip()
-    combined = base[base[code_col].isin(common_codes)].reset_index(drop=True)
+    combined = base.merge(common, on=code_col, how="inner").reset_index(drop=True)
 
     return combined, common_codes
 
 
 def combine_data_frames(data_dfs):
+    """
+    Łączy dane pomiarowe z wielu lat, pozostawiając tylko wspólne kolumny stacji.
 
-    col_sets = []
+    Wykorzystuje concat z join="inner", aby zachować wyłącznie kolumny
+    obecne we wszystkich ramkach danych.
+    """
+
     for i, df in enumerate(data_dfs):
-        cols = set(df.columns.astype(str))
-        print(f"[data {i}] station columns: {len(cols)}")
-        col_sets.append(cols)
+        print(f"[data {i}] liczba kolumn stacji: {df.columns.astype(str).nunique()}")
 
-    # intersection
-    common_cols = sorted(set.intersection(*col_sets))
-    print(f"[data] stations present in ALL years: {len(common_cols)}")
-
-    filtered = [df.loc[:, common_cols].copy() for df in data_dfs]
-    combined = pd.concat(filtered).sort_index()
+    # Inner join na kolumnach (wspólne stacje we wszystkich latach)
+    combined = pd.concat(data_dfs, axis=0, join="inner", sort=False).sort_index()
+    common_cols = list(combined.columns)
+    print(f"[data] stacje obecne we WSZYSTKICH latach: {len(common_cols)}")
 
     return combined, common_cols
