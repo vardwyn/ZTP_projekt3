@@ -121,61 +121,95 @@ def download_updated_metadata(metadata_url, sha256=None):
 
 
 def build_station_code_mapping(updated_metadata, verbose=True):
+    """
+    Buduje mapowanie kodów stacji (stary -> nowy) na podstawie metadanych.
 
-    mapping = {}
+    Zwraca słownik, w którym:
+    - aktualne kody mapują się do siebie (tożsamość),
+    - stare kody mapują się do odpowiadających im nowych kodów.
+    """
 
-    for _, row in updated_metadata.iterrows():
-        new_code = str(row["Kod stacji"]).strip()
-        if new_code:
-            mapping[new_code] = new_code
+    # Mapowanie tożsamości: nowy kod -> nowy kod
+    mapping_current = pd.Series(
+        updated_metadata["Kod stacji"].astype(str).str.strip().values,
+        index=updated_metadata["Kod stacji"].astype(str).str.strip().values,
+    )
 
-        old_codes = row.get("Stary Kod stacji")
-        if pd.notna(old_codes):
-            for old in str(old_codes).split(","):
-                old = old.strip()
-                if old:
-                    mapping[old] = new_code
+    # Rozwinięcie list starych kodów (comma-separated list), bez pętli po wierszach
+    old_codes = updated_metadata[["Kod stacji", "Stary Kod stacji"]].copy()
+    old_codes["Kod stacji"] = updated_metadata["Kod stacji"].astype(str).str.strip()
+    old_codes = old_codes[old_codes["Stary Kod stacji"].notna()]
+    old_codes["old_code"] = (
+        old_codes["Stary Kod stacji"]
+        .astype(str)
+        .str.split(",")
+    )
+
+    # Rozbij listy na wiersze i usuń białe znaki (częste po split po przecinku)
+    old_codes = old_codes.explode("old_code")
+    old_codes["old_code"] = old_codes["old_code"].astype(str).str.strip()
+    old_codes = old_codes[old_codes["old_code"] != ""]
+
+    # Mapowanie stary -> nowy
+    mapping_old = pd.Series(
+        old_codes["Kod stacji"].values,
+        index=old_codes["old_code"].values,
+    )
+
+    # Połączenie mapowań (stare mogą nadpisać tożsamość, jeśli wystąpią duplikaty)
+    mapping = mapping_current.to_dict()
+    mapping.update(mapping_old.to_dict())
 
     if verbose:
+        n_current = updated_metadata["Kod stacji"].nunique()
+        distinct_old = len(mapping) - n_current
         print(
-            f"[mapping] {updated_metadata['Kod stacji'].nunique()} current codes, "
-            f"{len(mapping) - updated_metadata['Kod stacji'].nunique()} distinct old codes"
+            f"[mapowanie] {n_current} aktualnych kodów, "
+            f"{distinct_old} unikalnych starych kodów"
         )
 
     return mapping
 
 
 def update_station_names_metadata(metadata_df, updated_metadata, code_mapping, label="metadata"):
+    """
+    Aktualizuje kody stacji w metadanych na podstawie mapowania (stary -> nowy).
+
+    - Wypisuje diagnostykę (ile kodów było aktualnych, zaktualizowanych i nieznanych).
+    - W przypadku nieznanych kodów przerywa działanie błędem.
+    """
 
     df = metadata_df.copy()
 
+    # Normalizacja kodów wejściowych
     df["Kod stacji"] = df["Kod stacji"].astype(str).str.strip()
     original_codes = df["Kod stacji"].copy()
 
-    mapped_codes = original_codes.map(lambda x: code_mapping.get(x, x))
+    # Mapowanie kodów; jeśli brak w mapie -> zostaje wartość oryginalna
+    mapped_codes = original_codes.map(code_mapping).fillna(original_codes)
 
     in_mapping = original_codes.isin(code_mapping.keys())
-    updated_mask   = in_mapping & (mapped_codes != original_codes)
-    current_mask   = in_mapping & (mapped_codes == original_codes)
+    updated_mask = in_mapping & (mapped_codes != original_codes)
+    current_mask = in_mapping & (mapped_codes == original_codes)
     unmatched_mask = ~in_mapping
 
-    n_updated   = int(updated_mask.sum())
-    n_current   = int(current_mask.sum())
+    n_updated = int(updated_mask.sum())
+    n_current = int(current_mask.sum())
     n_unmatched = int(unmatched_mask.sum())
-    n_total     = len(df)
+    n_total = len(df)
 
-    # sanity check
+    # Spójność zliczeń (powinny sumować się do liczby wierszy)
     if n_updated + n_current + n_unmatched != n_total:
         print(
-            f"[{label}] WARNING: counts do not add up! "
-            f"updated={n_updated}, current={n_current}, unmatched={n_unmatched}, "
-            f"total={n_total}"
+            f"[{label}] UWAGA: zliczenia się nie sumują! "
+            f"zaktualizowane={n_updated}, aktualne={n_current}, brak_mapy={n_unmatched}, "
+            f"razem={n_total}"
         )
 
-    print(f"[{label}] total stations (rows): {n_total}")
-    print(f"[{label}]   current names (already new): {n_current}")
-    print(f"[{label}]   updated from old -> new:       {n_updated}")
-    print(f"[{label}]   unmatched (not in mapping):   {n_unmatched}")
+    print(f"[{label}] liczba stacji (wierszy): {n_total}")
+    print(f"[{label}]   aktualne (już nowe):     {n_current}")
+    print(f"[{label}]   zaktualizowane:           {n_updated}")
+    print(f"[{label}]   brak mapowania:           {n_unmatched}")
 
     if n_updated > 0:
         changes = (
@@ -188,69 +222,87 @@ def update_station_names_metadata(metadata_df, updated_metadata, code_mapping, l
             .drop_duplicates()
             .reset_index(drop=True)
         )
-        print(f"[{label}] updated codes (old -> new):")
+        print(f"[{label}] zaktualizowane kody (stary -> nowy):")
         print(changes)
 
+    # Brak mapowania = błąd (chroni dalsze operacje)
     if n_unmatched > 0:
         unmatched_codes = (
             original_codes[unmatched_mask]
             .drop_duplicates()
             .reset_index(drop=True)
         )
-        print(f"[{label}] UNMATCHED codes (neither current nor old in updated_metadata):")
+        print(f"[{label}] KODY BEZ MAPOWANIA (brak w updated_metadata):")
         print(unmatched_codes)
         raise ValueError(
             f"[{label}] Found {n_unmatched} unmatched station codes: "
             f"{', '.join(unmatched_codes.astype(str))}"
         )
-        
-    df["Kod stacji"] = mapped_codes
 
+    # Zapisz zmapowane kody i dołącz informację o starych kodach
+    df["Kod stacji"] = mapped_codes
     df = df.merge(
         updated_metadata[["Kod stacji", "Stary Kod stacji"]],
         on="Kod stacji",
         how="left",
         suffixes=("", "_from_updated"),
     )
-    
-    missing = set(df["Kod stacji"]) - set(updated_metadata["Kod stacji"])
+
+    # Sanity check: wszystkie kody muszą istnieć w updated_metadata (po normalizacji)
+    updated_codes = set(updated_metadata["Kod stacji"].astype(str).str.strip())
+    missing = set(df["Kod stacji"]) - updated_codes
     assert not missing, (
-    f"[{label}] Some station codes in metadata_df are not in updated_metadata: "
-    f"{sorted(missing)}"
+        f"[{label}] Some station codes in metadata_df are not in updated_metadata: "
+        f"{sorted(missing)}"
     )
 
     return df
 
 
 def update_station_names_data(data_df, code_mapping, label="measurements"):
+    """
+    Aktualizuje nazwy kolumn (kody stacji) w danych pomiarowych.
+
+    - Stare kody są mapowane na nowe zgodnie z code_mapping.
+    - Brak mapowania pozostawia kod bez zmian (po normalizacji).
+    - Wypisuje diagnostykę o zmianach i potencjalnych duplikatach.
+    """
 
     original_cols = pd.Index(data_df.columns)
-    new_cols = original_cols.map(lambda x: code_mapping.get(x, x))
+    normalized_cols = original_cols.astype(str).str.strip()
 
-    # diagnostics: which columns will change
-    changed_mask = original_cols != new_cols
+    # Mapowanie kodów; jeśli brak w mapie -> zostaje wartość znormalizowana
+    mapped_cols = pd.Index(normalized_cols.map(code_mapping))
+    new_cols = mapped_cols.where(mapped_cols.notna(), normalized_cols)
+
+    # Diagnostyka zmian (uwzględnia również korektę białych znaków)
+    changed_mask = original_cols.astype(str) != new_cols
     n_changed = int(changed_mask.sum())
-    print(f"[{label}] measurements: {n_changed} station columns renamed")
+    print(f"[{label}] pomiary: zmienionych kolumn stacji: {n_changed}")
 
     if n_changed > 0:
         changes = (
-            pd.DataFrame({"old_code": original_cols, "new_code": new_cols})
+            pd.DataFrame({"old_code": original_cols.astype(str), "new_code": new_cols})
             .loc[changed_mask]
             .drop_duplicates()
             .reset_index(drop=True)
         )
-        print(f"[{label}] renamed columns (old -> new):")
+        print(f"[{label}] zmienione kolumny (stary -> nowy):")
         print(changes)
 
+    # Ostrzeżenie o duplikatach po mapowaniu (wiele starych -> jeden nowy)
     vc = pd.Series(new_cols).value_counts()
     duplicates = vc[vc > 1]
     if not duplicates.empty:
-        print(f"[{label}] WARNING: {len(duplicates)} station codes appear multiple "
-              f"times after renaming (likely multiple old codes -> one new code):")
+        print(
+            f"[{label}] UWAGA: {len(duplicates)} kodów stacji występuje wielokrotnie "
+            f"po zmianie (prawdopodobnie kilka starych -> jeden nowy):"
+        )
         print(duplicates)
 
-    # apply rename
-    data_df = data_df.rename(columns=code_mapping)
+    # Zastosuj nowe nazwy kolumn
+    rename_map = dict(zip(original_cols, new_cols))
+    data_df = data_df.rename(columns=rename_map)
 
     return data_df
 
