@@ -69,19 +69,30 @@ def reformat_raw_dfs(raw_df, meta_keys=None):
     return stations, measurements
 
 
-def download_updated_metadata():
-    url = f"https://powietrze.gios.gov.pl/pjp/archives/downloadFile/622"
-    response = requests.get(url)
+def download_updated_metadata(metadata_url, sha256=None):
+    """
+    Pobiera aktualne metadane stacji i zwraca je jako DataFrame.
+
+    Parametry:
+    - metadata_url: pełny URL do pliku z metadanymi (xlsx)
+    - sha256: opcjonalny oczekiwany hash SHA-256 (hex); jeśli None, pomija weryfikację
+    """
+    response = requests.get(metadata_url)
     response.raise_for_status()
-        
-    actual_hash = hashlib.sha256(response.content).hexdigest()
-    if actual_hash != "174290b98ceb780c69769806f7f7a6054015cd78ead8ee65746f3fceba66b2ab":
-        raise ValueError(f"SHA256 mismatch: {actual_hash}")
+
+    content_type = getattr(response, "headers", {}).get("Content-Type")
+    if content_type and "text/html" in content_type.lower():
+        raise ValueError(f"Unexpected Content-Type: {content_type}")
+
+    if sha256:
+        actual_hash = hashlib.sha256(response.content).hexdigest()
+        if actual_hash.lower() != sha256.lower():
+            raise ValueError(f"SHA256 nieprawidłowy! Plik: {actual_hash}")
 
     try:
         updated_metadata_df = pd.read_excel(io.BytesIO(response.content))
     except Exception as e:
-        print(f"Błąd przy wczytywaniu metadanych!")
+        raise RuntimeError("Błąd przy wczytywaniu metadanych!") from e
 
     updated_metadata_df = updated_metadata_df.rename(columns={"Stary Kod stacji \n(o ile inny od aktualnego)": "Stary Kod stacji"})
     updated_metadata_df["Kod stacji"] = updated_metadata_df["Kod stacji"].astype(str).str.strip() # jedna stacja (patrzę na ciebie LuLubsStrzelMOB) ma spację na końcu nazwy
