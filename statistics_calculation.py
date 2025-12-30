@@ -268,25 +268,6 @@ def monthly_avg_with_nan_threshold(
     return monthly_mean
 
 
-def hourly_to_daily_30d_sma(df_hourly: pd.DataFrame,
-                            window_days: int = 30,
-                            min_periods: int | None = None) -> pd.DataFrame:
-
-    if min_periods is None:
-        min_periods = window_days
-
-    df = df_hourly.copy()
-
-    df.index = shift_midnight_to_previous_day(df.index).normalize()
-
-    daily = df.resample("D").mean()
-
-    daily_sma = daily.rolling(window=window_days,
-                              min_periods=min_periods).mean()
-
-    return daily_sma
-
-
 def average_by_city(
     measurements_df: pd.DataFrame,
     metadata_combined: pd.DataFrame,

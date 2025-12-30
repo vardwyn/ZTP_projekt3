@@ -2,7 +2,6 @@ import pandas as pd
 
 from statistics_calculation import (
     shift_midnight_to_previous_day,
-    hourly_to_daily_30d_sma,
     count_days_over_threshold,
     monthly_avg_with_nan_threshold,
 )
@@ -96,40 +95,6 @@ def test_count_days_over_threshold_multi_station_multi_year():
     assert result.loc["B2", 2023] == 0
     assert result.loc["B2", 2024] == 1
     assert result.loc["B2", 2025] == 1
-
-
-def test_hourly_to_daily_30d_sma_midnight_in_previous_day():
-    idx = pd.to_datetime(
-        [
-            "2024-01-01 23:00:00",
-            "2024-01-02 00:00:00",
-            "2024-01-02 01:00:00",
-        ]
-    )
-    df = pd.DataFrame({"A1": [10.0, 50.0, 10.0]}, index=idx)
-
-    daily = hourly_to_daily_30d_sma(df, window_days=1, min_periods=1)
-
-    assert daily.loc["2024-01-01", "A1"] == 30.0
-    assert daily.loc["2024-01-02", "A1"] == 10.0
-
-
-def test_hourly_to_daily_30d_sma_multiple_stations():
-    idx = pd.date_range("2024-01-01 22:00:00", periods=5, freq="h")
-    df = pd.DataFrame(
-        {
-            "A1": [1.0, 2.0, 3.0, 4.0, 5.0],
-            "B2": [10.0, 20.0, 30.0, 40.0, 50.0],
-        },
-        index=idx,
-    )
-
-    daily = hourly_to_daily_30d_sma(df, window_days=1, min_periods=1)
-
-    # 2024-01-01: 22:00, 23:00, 00:00 (shifted)
-    assert daily.loc["2024-01-01", "A1"] == (1 + 2 + 3) / 3
-    # 2024-01-02: 01:00, 02:00
-    assert daily.loc["2024-01-02", "A1"] == (4 + 5) / 2
 
 
 def test_monthly_avg_with_nan_threshold_midnight_in_previous_day():
