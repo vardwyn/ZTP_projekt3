@@ -183,6 +183,14 @@ def check_timestamps(df, meta_keys=None, expected_freq=None):
 
 
 def report_nan_runs(meas_df: pd.DataFrame, top_k: int = 3):
+    """
+    Raportuje najdłuższe ciągi braków danych (NaN) dla każdej stacji.
+
+    Zwraca słownik z:
+    - liczbą wszystkich stacji,
+    - liczbą stacji zawierających choć jeden NaN,
+    - mapą: kod_stacji -> DataFrame z top_k najdłuższymi lukami (w dniach).
+    """
 
     df = meas_df.copy()
     total_stations = df.shape[1]
@@ -192,41 +200,42 @@ def report_nan_runs(meas_df: pd.DataFrame, top_k: int = 3):
 
     for col in df.columns:
         s = df[col]
-        m = s.isna()
+        mask = s.isna()
 
-        if not m.any():
+        if not mask.any():
             continue
 
         stations_with_any_nan += 1
 
-        g = (m.ne(m.shift()).cumsum()) * m
+        # Grupujemy kolejne bloki True/False; interesują nas tylko bloki NaN
+        block_id = mask.ne(mask.shift()).cumsum()
+        nan_blocks = s[mask].groupby(block_id[mask])
 
         segments = []
-        nan_groups = g[m] 
-
-        for gid, grp in nan_groups.groupby(nan_groups):
+        for _, grp in nan_blocks:
             idx = grp.index
-            start = idx[0]
-            end = idx[-1]
-            length = len(idx)
-
             segments.append(
-                {"start": start, "end": end, "length": length/24}
+                {
+                    "start": idx[0],
+                    "end": idx[-1],
+                    "length": len(idx) / 24,  # długość w dniach (dla danych godzinowych)
+                }
             )
 
         if segments:
-            seg_df = pd.DataFrame(segments).sort_values(
-                "length", ascending=False
-            ).head(top_k)
-            nan_runs[col] = seg_df.reset_index(drop=True)
+            seg_df = (
+                pd.DataFrame(segments)
+                .sort_values("length", ascending=False)
+                .head(top_k)
+                .reset_index(drop=True)
+            )
+            nan_runs[col] = seg_df
 
-    report = {
+    return {
         "total_stations": total_stations,
         "stations_with_any_nan": stations_with_any_nan,
         "nan_runs": nan_runs,
     }
-
-    return report
 
 
 def monthly_avg_with_nan_threshold(
