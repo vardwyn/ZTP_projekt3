@@ -254,17 +254,22 @@ def monthly_avg_with_nan_threshold(
     data: pd.DataFrame,
     max_nan_per_month: int,
 ) -> pd.DataFrame:
+    """
+    Liczy średnie miesięczne i maskuje miesiące z nadmiarem braków danych.
+
+    - Midnight (00:00) przypisywany jest do poprzedniego dnia.
+    - Jeśli liczba NaN w miesiącu przekracza próg, wynik jest maskowany.
+    """
 
     work_df = data.copy()
     work_df.index = shift_midnight_to_previous_day(work_df.index)
 
+    # Średnia miesięczna i liczba braków
     monthly_mean = work_df.resample("ME").mean()
-
     monthly_nan_count = work_df.isna().resample("ME").sum()
 
-    bad_mask = monthly_nan_count > max_nan_per_month
-    monthly_mean = monthly_mean.mask(bad_mask)
-
+    # Maskowanie miesięcy zbyt "dziurawych" (NaN count > threshold)
+    monthly_mean = monthly_mean.mask(monthly_nan_count > max_nan_per_month)
     return monthly_mean
 
 
@@ -274,6 +279,11 @@ def average_by_city(
     code_col: str = "Kod stacji",
     city_col: str = "Miejscowość",
 ) -> pd.DataFrame:
+    """
+    Agreguje pomiary do poziomu miasta (średnia po stacjach w tym samym mieście).
+
+    Sprawdza, czy wszystkie stacje mają przypisane miasto w metadanych.
+    """
 
     df = measurements_df.copy()
     df.columns = df.columns.astype(str).str.strip()
@@ -281,18 +291,19 @@ def average_by_city(
     meta = metadata_combined.copy()
     meta[code_col] = meta[code_col].astype(str).str.strip()
 
-    meas_codes = set(df.columns)
-    meta_codes_all = set(meta[code_col])
-    meta_codes_with_city = set(meta.loc[meta[city_col].notna(), code_col])
+    # Mapowanie stacja -> miasto
+    meta_valid = meta.loc[meta[city_col].notna(), [code_col, city_col]]
+    station_to_city = meta_valid.drop_duplicates(subset=code_col).set_index(code_col)[city_col]
 
-    missing_in_meta = sorted(meas_codes - meta_codes_all)
+    # Walidacja braków w metadanych
+    missing_in_meta = sorted(set(df.columns) - set(meta[code_col]))
     if missing_in_meta:
         raise AssertionError(
             "Stations present in data but missing in metadata_combined: "
             + ", ".join(missing_in_meta)
         )
 
-    missing_city = sorted(meas_codes - meta_codes_with_city)
+    missing_city = sorted(set(df.columns) - set(station_to_city.index))
     if missing_city:
         raise AssertionError(
             "Stations present in data but without city (NaN) "
@@ -300,15 +311,8 @@ def average_by_city(
             + ", ".join(missing_city)
         )
 
-    meta_valid = (
-        meta.loc[meta[city_col].notna(), [code_col, city_col]]
-        .drop_duplicates(subset=code_col, keep="first")
-    )
-    station_to_city = meta_valid.set_index(code_col)[city_col].to_dict()
-
-    col_cities = pd.Series({code: station_to_city[code] for code in df.columns},
-                           name="city")
-
+    # Grupowanie po mieście (kolumny)
+    col_cities = df.columns.map(station_to_city)
     df_city = df.groupby(axis=1, by=col_cities).mean()
 
     return df_city
@@ -317,13 +321,21 @@ def average_by_city(
 def count_days_over_threshold(meas_df: pd.DataFrame,
                               threshold: float,
                               years=(2014, 2019, 2024)) -> pd.DataFrame:
+    """
+    Zlicza liczbę dni w roku, w których średnia dobowa przekracza próg.
+
+    - Midnight (00:00) przypisywany jest do poprzedniego dnia.
+    - Wynik zwracany jest w układzie: stacja x rok.
+    """
+
     df = meas_df.copy()
     df.index = shift_midnight_to_previous_day(df.index).normalize()
 
-    # średnia dobowa > threshold
+    # Średnia dobowa i przekroczenia progu
     daily_mean = df.groupby(df.index).mean()
     daily_over = daily_mean.gt(threshold)
 
+    # Zliczanie przekroczeń w podziale na lata
     days_per_year = daily_over.groupby(daily_over.index.year).sum()
 
     result = days_per_year.reindex(index=years, fill_value=0).T
