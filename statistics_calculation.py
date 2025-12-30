@@ -2,21 +2,36 @@ import pandas as pd
 
 
 def analyze_raw_df(df, meta_keys=None):
+    """
+    Analizuje surowy DataFrame z danymi GIOŚ.
 
+    Zwraca słownik z podstawowymi statystykami:
+    - kształt danych,
+    - liczba wierszy metadanych i pomiarów,
+    - unikalność wybranych pól metadanych,
+    - unikalne wartości pola "Czas uśredniania" i "Wskaźnik",
+    - top 10 stacji z największym udziałem braków danych.
+    """
+
+    meta_keys = meta_keys or []
     labels = df.iloc[:, 0]
 
+    # Pomocniczo pobieramy pojedynczy wiersz metadanych (jeśli istnieje)
     def get_meta_row(name):
         rows = df.loc[labels == name]
         if rows.empty:
             return None
         return rows.iloc[0, 1:]
 
-    nr_row          = get_meta_row("Nr")
-    kod_stacji_row  = get_meta_row("Kod stacji")
-    kod_stan_row    = get_meta_row("Kod stanowiska")
-    czas_row        = get_meta_row("Czas uśredniania")
-    wskaznik_row    = get_meta_row("Wskaźnik")
+    meta_rows = {
+        "Nr": get_meta_row("Nr"),
+        "Kod stacji": get_meta_row("Kod stacji"),
+        "Kod stanowiska": get_meta_row("Kod stanowiska"),
+        "Czas uśredniania": get_meta_row("Czas uśredniania"),
+        "Wskaźnik": get_meta_row("Wskaźnik"),
+    }
 
+    # Informacja o unikalności wybranych metadanych
     def uniq_info(s):
         if s is None:
             return {"all_unique": None, "duplicates": None}
@@ -26,38 +41,48 @@ def analyze_raw_df(df, meta_keys=None):
             "duplicates": dup if not dup.empty else None,
         }
 
-    nr_info         = uniq_info(nr_row)
-    kod_stacji_info = uniq_info(kod_stacji_row)
-    kod_stan_info   = uniq_info(kod_stan_row)
+    uniqueness = {
+        "Nr": uniq_info(meta_rows["Nr"]),
+        "Kod stacji": uniq_info(meta_rows["Kod stacji"]),
+        "Kod stanowiska": uniq_info(meta_rows["Kod stanowiska"]),
+    }
 
+    # Unikalne wartości w polach opisowych (jeśli istnieją)
     def uniques_list(s):
         if s is None:
             return None
         return pd.Series(s.dropna().unique()).tolist()
 
-    czas_unique     = uniques_list(czas_row)
-    wskaznik_unique = uniques_list(wskaznik_row)
+    unique_values = {
+        "Czas uśredniania": uniques_list(meta_rows["Czas uśredniania"]),
+        "Wskaźnik": uniques_list(meta_rows["Wskaźnik"]),
+    }
 
+    # Wydzielamy tylko wiersze z pomiarami czasowymi
     timestamp_mask = ~labels.isin(meta_keys)
     meas = df.loc[timestamp_mask, 1:]
 
+    # Procent braków danych per kolumna-stacja
     nan_per_station = meas.isna().mean() * 100
+    top10_nan = nan_per_station.sort_values(ascending=False).head(10)
 
-    if kod_stacji_row is not None:
-        station_codes = kod_stacji_row.reindex(meas.columns)
+    # Mapujemy numer kolumny na kod stacji (jeśli jest dostępny)
+    if meta_rows["Kod stacji"] is not None:
+        station_codes = meta_rows["Kod stacji"].reindex(meas.columns)
     else:
         station_codes = pd.Series(index=meas.columns, dtype=object)
 
-    top10_nan = nan_per_station.sort_values(ascending=False).head(10)
-    top10_nan_stations = pd.DataFrame({
-        "station_column": top10_nan.index,
-        "station_code": station_codes.reindex(top10_nan.index).values,
-        "nan_percent": top10_nan.values,
-    }).reset_index(drop=True)
+    top10_nan_stations = pd.DataFrame(
+        {
+            "station_column": top10_nan.index,
+            "station_code": station_codes.reindex(top10_nan.index).values,
+            "nan_percent": top10_nan.values,
+        }
+    ).reset_index(drop=True)
 
     num_timestamps = int(timestamp_mask.sum())
-    num_metadata   = int((~timestamp_mask).sum())
-    num_stations   = df.shape[1] - 1
+    num_metadata = int((~timestamp_mask).sum())
+    num_stations = df.shape[1] - 1
 
     return {
         "shape": {"rows": df.shape[0], "columns": df.shape[1]},
@@ -66,81 +91,82 @@ def analyze_raw_df(df, meta_keys=None):
             "metadata_rows": num_metadata,
             "stations": num_stations,
         },
-        "uniqueness": {
-            "Nr": nr_info,
-            "Kod stacji": kod_stacji_info,
-            "Kod stanowiska": kod_stan_info,
-        },
-        "unique_values": {
-            "Czas uśredniania": czas_unique,
-            "Wskaźnik": wskaznik_unique,
-        },
+        "uniqueness": uniqueness,
+        "unique_values": unique_values,
         "nan_by_station_top10": top10_nan_stations,
     }
 
 
 def check_timestamps(df, meta_keys=None, expected_freq=None):
+    """
+    Sprawdza poprawność i ciągłość znaczników czasu w surowych danych.
 
+    Zwraca m.in.:
+    - liczbę poprawnych i niepoprawnych timestampów,
+    - duplikaty,
+    - dominującą różnicę czasową,
+    - listę brakujących i nadmiarowych timestampów.
+    """
+
+    meta_keys = meta_keys or []
     labels = df.iloc[:, 0]
 
+    # Wiersze niebędące metadanymi traktujemy jako znaczniki czasu
     ts_mask = ~labels.isin(meta_keys)
     ts_raw = labels[ts_mask]
 
     ts_parsed = pd.to_datetime(ts_raw, errors="coerce")
-
     invalid_ts = ts_raw[ts_parsed.isna()]
 
-    ts = ts_parsed.dropna()
-    ts_sorted = ts.sort_values()
+    ts = ts_parsed.dropna().sort_values()
+    dup = ts[ts.duplicated(keep=False)]
 
-    all_unique = ts_sorted.is_unique
-    dup = ts_sorted[ts_sorted.duplicated(keep=False)]
+    deltas = ts.diff().dropna()
 
-    deltas = ts_sorted.diff().dropna()
-
+    # Główna różnica czasu (dominująca lub oczekiwana)
     if expected_freq is None:
-        if deltas.empty:
-            main_delta = None
-        else:
-            main_delta = deltas.value_counts().idxmax()
+        main_delta = deltas.value_counts().idxmax() if not deltas.empty else None
     else:
         main_delta = pd.to_timedelta(pd.tseries.frequencies.to_offset(expected_freq))
 
+    # Nieregularne odstępy czasu
     irregular_intervals = None
     if main_delta is not None and not deltas.empty:
         bad = deltas[deltas != main_delta]
         if not bad.empty:
-            records = []
-            for idx, delta in bad.items():
-                pos = ts_sorted.index.get_loc(idx)
-                prev_ts = ts_sorted.iloc[pos - 1]
-                est_missing = int(delta / main_delta) - 1 if main_delta > pd.Timedelta(0) else None
-                records.append({
-                    "prev_timestamp": prev_ts,
-                    "current_timestamp": ts_sorted.loc[idx],
-                    "actual_delta": delta,
+            prev_ts = ts.shift(1).loc[bad.index]
+            irregular_intervals = pd.DataFrame(
+                {
+                    "prev_timestamp": prev_ts.values,
+                    "current_timestamp": ts.loc[bad.index].values,
+                    "actual_delta": bad.values,
                     "expected_delta": main_delta,
-                    "estimated_missing_between": max(est_missing, 0) if est_missing is not None else None,
-                })
-            irregular_intervals = pd.DataFrame(records)
+                }
+            )
+            if main_delta > pd.Timedelta(0):
+                est_missing = (bad / main_delta).astype("int64") - 1
+                irregular_intervals["estimated_missing_between"] = est_missing.clip(lower=0).values
+            else:
+                irregular_intervals["estimated_missing_between"] = None
 
+    # Braki i nadmiarowe timestampy względem pełnego zakresu
     missing_ts = extra_ts = None
-    if main_delta is not None and len(ts_sorted) > 1:
-        expected_range = pd.date_range(ts_sorted.iloc[0], ts_sorted.iloc[-1], freq=main_delta)
-        missing_ts = expected_range.difference(ts_sorted)
-        extra_ts = ts_sorted[~ts_sorted.isin(expected_range)]
+    if main_delta is not None and len(ts) > 1:
+        expected_range = pd.date_range(ts.iloc[0], ts.iloc[-1], freq=main_delta)
+        missing_ts = expected_range.difference(ts)
+        extra_ts = ts[~ts.isin(expected_range)]
 
     summary = {
         "n_timestamp_rows": int(ts_mask.sum()),
         "n_valid_timestamps": int(len(ts)),
         "n_invalid_timestamps": int(len(invalid_ts)),
-        "all_unique": bool(all_unique),
+        "all_unique": bool(ts.is_unique),
         "n_duplicates": int(len(dup)),
         "main_delta": main_delta,
         "n_unique_deltas": int(deltas.nunique()) if not deltas.empty else 0,
         "expected_total_points_if_full_range": (
-            int(((ts_sorted.iloc[-1] - ts_sorted.iloc[0]) / main_delta) + 1)
-            if main_delta not in (None, pd.Timedelta(0)) and len(ts_sorted) > 1
+            int(((ts.iloc[-1] - ts.iloc[0]) / main_delta) + 1)
+            if main_delta not in (None, pd.Timedelta(0)) and len(ts) > 1
             else None
         ),
     }
