@@ -237,6 +237,18 @@ def report_nan_runs(meas_df: pd.DataFrame, top_k: int = 3):
         "nan_runs": nan_runs,
     }
 
+def shift_midnight_to_previous_day(index: pd.Index) -> pd.DatetimeIndex:
+    """
+    Przesuwa dokładnie północ (00:00:00) na koniec poprzedniego dnia.
+
+    Zwraca nowy indeks, zachowując kolejność elementów (bez przestawiania).
+    """
+
+    ts = pd.to_datetime(index)
+    midnight_mask = ts == ts.normalize()
+    # Odejmujemy 1 ns, aby północ "należała" do poprzedniego dnia,
+    # ale pozostała chronologicznie po ostatnich pomiarach dnia.
+    return ts.where(~midnight_mask, ts - pd.Timedelta(nanoseconds=1))
 
 def monthly_avg_with_nan_threshold(
     data: pd.DataFrame,
@@ -244,18 +256,11 @@ def monthly_avg_with_nan_threshold(
 ) -> pd.DataFrame:
 
     work_df = data.copy()
-    work_df.index = pd.to_datetime(work_df.index)
+    work_df.index = shift_midnight_to_previous_day(work_df.index)
 
-    # północ -- poprzedni dzień
-    midnight_mask = work_df.index == work_df.index.normalize()
-    effective_index = work_df.index - pd.to_timedelta(
-        midnight_mask.astype(int), unit="D"
-    )
-    work_df.index = effective_index
+    monthly_mean = work_df.resample("ME").mean()
 
-    monthly_mean = work_df.resample("M").mean()
-
-    monthly_nan_count = work_df.isna().resample("M").sum()
+    monthly_nan_count = work_df.isna().resample("ME").sum()
 
     bad_mask = monthly_nan_count > max_nan_per_month
     monthly_mean = monthly_mean.mask(bad_mask)
@@ -272,19 +277,7 @@ def hourly_to_daily_30d_sma(df_hourly: pd.DataFrame,
 
     df = df_hourly.copy()
 
-    ts = pd.to_datetime(df.index)
-    df.index = ts
-
-    # Północ - poprzedni dzień
-    midnight_mask = (
-        (ts.hour == 0) &
-        (ts.minute == 0) &
-        (ts.second == 0) &
-        (ts.microsecond == 0)
-    )
-    effective_ts = ts.where(~midnight_mask, ts - pd.Timedelta(days=1))
-
-    df.index = effective_ts.normalize()
+    df.index = shift_midnight_to_previous_day(df.index).normalize()
 
     daily = df.resample("D").mean()
 
@@ -344,19 +337,7 @@ def count_days_over_threshold(meas_df: pd.DataFrame,
                               threshold: float,
                               years=(2014, 2019, 2024)) -> pd.DataFrame:
     df = meas_df.copy()
-    ts = pd.to_datetime(df.index)
-    df.index = ts
-
-    # północ -- poprzedni dzień
-    midnight_mask = (
-        (ts.hour == 0) &
-        (ts.minute == 0) &
-        (ts.second == 0) &
-        (ts.microsecond == 0)
-    )
-    effective_ts = ts.where(~midnight_mask, ts - pd.Timedelta(days=1))
-    day_index = effective_ts.normalize()
-    df.index = day_index
+    df.index = shift_midnight_to_previous_day(df.index).normalize()
 
     # średnia dobowa > threshold
     daily_mean = df.groupby(df.index).mean()
