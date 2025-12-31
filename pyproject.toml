@@ -9,6 +9,7 @@ dependencies = [
   "pandas",
   "numpy",
   "matplotlib",
+  "seaborn",
   "requests",
   "openpyxl",
   "jupyter",

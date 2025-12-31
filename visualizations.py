@@ -2,10 +2,58 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib as mpl
-import colorsys
+import seaborn as sns
 from matplotlib import gridspec
-from matplotlib.colors import to_rgb
 from matplotlib.patches import Patch
+
+
+# ============================================================
+# Funkcje pomocnicze – wspólne dla wielu wykresów
+# ============================================================
+
+def _group_by_year_with_data(df: pd.DataFrame, years_order=None):
+    """
+    Grupuje dane po roku i zwraca:
+    - słownik {rok -> ramka danych}
+    - listę lat z co najmniej jedną nie-NaN wartością
+    """
+    groups = {year: df_y for year, df_y in df.groupby(df.index.year)}
+    candidate_years = years_order or sorted(groups.keys())
+    years = [
+        year for year in candidate_years
+        if year in groups and groups[year].notna().any().any()
+    ]
+    return groups, years
+
+
+def _build_panel_axes(
+    n_panels,
+    ncols,
+    panel_size,
+    sharex,
+    sharey,
+    hspace,
+    wspace,
+):
+    """
+    Tworzy figurę i spłaszczoną listę osi dla paneli.
+    Zwraca: (fig, axes_list, nrows, ncols).
+    """
+    ncols = max(1, int(ncols))
+    nrows = int((n_panels + ncols - 1) / ncols)
+
+    fig_w = panel_size[0] * ncols
+    fig_h = panel_size[1] * nrows
+    fig, axes = plt.subplots(
+        nrows=nrows,
+        ncols=ncols,
+        figsize=(fig_w, fig_h),
+        sharex=sharex,
+        sharey=sharey,
+    )
+    axes_list = np.atleast_1d(axes).ravel().tolist()
+    fig.subplots_adjust(hspace=hspace, wspace=wspace)
+    return fig, axes_list, nrows, ncols
 
 
 def plot_monthly_avg_station_per_year(
@@ -13,7 +61,6 @@ def plot_monthly_avg_station_per_year(
     main_title=None,
     main_title_fontsize=None,
     main_title_y=0.98,
-    main_title_top=None,
     years_order=None,
     ncols=1,
     panel_size=(10, 4),
@@ -26,7 +73,7 @@ def plot_monthly_avg_station_per_year(
     legend_title="Stacja",
     legend_title_fontsize=None,
     legend_frame=True,
-    legend_mode="right",
+    legend_enabled=True,
     legend_ncol=2,
     right_margin=0.99,
     sharey=True,
@@ -39,7 +86,6 @@ def plot_monthly_avg_station_per_year(
     - main_title: tytuł całego wykresu (None = brak tytułu)
     - main_title_fontsize: rozmiar tytułu głównego (domyślnie jak title_fontsize)
     - main_title_y: pozycja tytułu głównego na osi Y (0..1)
-    - main_title_top: opcjonalny górny margines figury (0..1) przy tytule
     - years_order: kolejność lat (lista/iterowalne), domyślnie rosnąco
     - ncols: liczba kolumn w układzie paneli (>= 1)
     - panel_size: rozmiar pojedynczego panelu (width, height)
@@ -51,51 +97,38 @@ def plot_monthly_avg_station_per_year(
     - legend_title: tytuł legendy
     - legend_title_fontsize: rozmiar tytułu legendy (domyślnie jak legend_fontsize)
     - legend_frame: czy rysować ramkę wokół legendy
-    - legend_mode: tryb legendy:
-        * "last"   – legenda tylko na ostatnim panelu,
-        * "axis"   – legenda na każdym panelu,
-        * "figure" – jedna legenda u góry całej figury,
-        * "right"  – jedna legenda po prawej stronie figury,
-        * "none"   – brak legendy.
+    - legend_enabled: czy pokazać legendę (po prawej) czy nie
     - legend_ncol: liczba kolumn w legendzie
-    - right_margin: prawy margines
+    - right_margin: prawy margines (miejsce na legendę po prawej)
     - sharex / sharey: współdzielenie osi między panelami
     """
 
+    # ------------------------------------------------------------------
+    # 1) Walidacja i przygotowanie danych
+    # ------------------------------------------------------------------
     if monthly_avg.empty:
         return
 
-    # Upewnij się, że indeks jest typu datetime
-    df = monthly_avg.copy()
-    df.index = pd.to_datetime(df.index)
-
-    # Grupowanie po latach i ustalenie kolejności (tylko lata z danymi)
-    groups = {year: df_y for year, df_y in df.groupby(df.index.year)}
-    candidate_years = years_order or sorted(groups.keys())
-    years = [
-        year for year in candidate_years
-        if year in groups and groups[year].notna().any().any()
-    ]
+    assert isinstance(monthly_avg.index, pd.DatetimeIndex), (
+        "Indeks musi być typu DatetimeIndex."
+    )
+    df = monthly_avg
+    groups, years = _group_by_year_with_data(df, years_order)
     if not years:
         return
 
-    # Układ paneli
-    ncols = max(1, int(ncols))
-    nrows = int((len(years) + ncols - 1) / ncols)
-    fig_w = panel_size[0] * ncols
-    fig_h = panel_size[1] * nrows
-    fig, axes = plt.subplots(
-        nrows=nrows,
+    # ------------------------------------------------------------------
+    # 2) Budowa układu paneli i ustawienia figury
+    # ------------------------------------------------------------------
+    fig, axes, _, _ = _build_panel_axes(
+        n_panels=len(years),
         ncols=ncols,
-        figsize=(fig_w, fig_h),
+        panel_size=panel_size,
         sharex=sharex,
         sharey=sharey,
+        hspace=hspace,
+        wspace=wspace,
     )
-    axes = (axes if isinstance(axes, (list, np.ndarray)) else [axes])
-    axes = list(np.array(axes).ravel())
-    fig.subplots_adjust(hspace=hspace, wspace=wspace)
-
-    # Tytuł całego wykresu (opcjonalnie)
     if main_title:
         fig.suptitle(
             main_title,
@@ -104,25 +137,26 @@ def plot_monthly_avg_station_per_year(
             y=main_title_y,
             ha="center",
         )
-        if main_title_top is not None:
-            fig.subplots_adjust(top=main_title_top)
 
-    # Gromadzimy etykiety do legendy zbiorczej (jeśli potrzebna)
+    # ------------------------------------------------------------------
+    # 3) Rysowanie linii oraz zbieranie uchwytów do legendy
+    # ------------------------------------------------------------------
     legend_handles = {}
 
     for ax, year in zip(axes, years):
         df_y = groups[year]
-
-        # Oś X = miesiące (1..12), oś Y = wartości stacji
         months = df_y.index.month
-        for station in df_y.columns:
+
+        # Linie dla każdej stacji w danym roku
+        for station, series in df_y.items():
             line = ax.plot(
                 months,
-                df_y[station],
+                series,
                 marker="o",
                 markersize=marker_size,
                 label=str(station),
             )[0]
+            # Kolejność legendy opiera się o pierwsze wystąpienie stacji;
             legend_handles[str(station)] = line
 
         ax.set_xticks(range(1, 13))
@@ -130,31 +164,14 @@ def plot_monthly_avg_station_per_year(
         ax.set_ylabel("PM2.5 [mcg/m^3]", fontsize=label_fontsize)
         ax.set_title(f"Rok {year}", fontsize=title_fontsize)
         ax.grid(axis="y", linestyle="--", alpha=0.4)
-        if legend_mode == "axis":
-            leg = ax.legend(
-                title=legend_title,
-                fontsize=legend_fontsize,
-                ncol=legend_ncol,
-                frameon=legend_frame,
-            )
-            if legend_title_fontsize:
-                leg.get_title().set_fontsize(legend_title_fontsize)
 
-    # Ukryj niewykorzystane panele (gdy ncols > 1 i liczba lat nie wypełnia siatki)
+    # ------------------------------------------------------------------
+    # 4) Ukrycie pustych paneli + legenda zbiorcza (jeśli wybrana)
+    # ------------------------------------------------------------------
     for ax in axes[len(years):]:
         ax.set_visible(False)
 
-    if legend_mode == "last" and legend_handles and years:
-        leg = axes[len(years) - 1].legend(
-            title=legend_title,
-            fontsize=legend_fontsize,
-            ncol=legend_ncol,
-            frameon=legend_frame,
-        )
-        if legend_title_fontsize:
-            leg.get_title().set_fontsize(legend_title_fontsize)
-    elif legend_mode == "right" and legend_handles:
-        # Legenda w prawym marginesie figury (wewnątrz obszaru 0..1)
+    if legend_enabled and legend_handles:
         leg = fig.legend(
             handles=list(legend_handles.values()),
             labels=list(legend_handles.keys()),
@@ -168,20 +185,7 @@ def plot_monthly_avg_station_per_year(
         if legend_title_fontsize:
             leg.get_title().set_fontsize(legend_title_fontsize)
         fig.subplots_adjust(right=right_margin)
-    elif legend_mode == "figure" and legend_handles:
-        leg = fig.legend(
-            handles=list(legend_handles.values()),
-            labels=list(legend_handles.keys()),
-            title=legend_title,
-            fontsize=legend_fontsize,
-            ncol=legend_ncol,
-            loc="upper center",
-            bbox_to_anchor=(0.5, 1.02),
-            frameon=legend_frame,
-        )
-        if legend_title_fontsize:
-            leg.get_title().set_fontsize(legend_title_fontsize)
-    # legend_mode == "none" -> brak legendy
+
     plt.show()
 
 
@@ -190,7 +194,6 @@ def plot_monthly_avg_station_mean_std_per_year(
     main_title=None,
     main_title_fontsize=None,
     main_title_y=0.98,
-    main_title_top=None,
     years_order=None,
     ncols=1,
     panel_size=(10, 4),
@@ -203,7 +206,7 @@ def plot_monthly_avg_station_mean_std_per_year(
     legend_title="Legenda",
     legend_title_fontsize=None,
     legend_frame=True,
-    legend_mode="last",
+    legend_enabled=True,
     legend_ncol=1,
     right_margin=0.99,
     sharey=True,
@@ -217,7 +220,6 @@ def plot_monthly_avg_station_mean_std_per_year(
     - main_title: tytuł całego wykresu (None = brak tytułu)
     - main_title_fontsize: rozmiar tytułu głównego (domyślnie jak title_fontsize)
     - main_title_y: pozycja tytułu głównego na osi Y (0..1)
-    - main_title_top: opcjonalny górny margines figury (0..1) przy tytule
     - years_order: kolejność lat (lista/iterowalne), domyślnie rosnąco
     - ncols: liczba kolumn w układzie paneli (>= 1)
     - panel_size: rozmiar pojedynczego panelu (width, height)
@@ -229,47 +231,38 @@ def plot_monthly_avg_station_mean_std_per_year(
     - legend_title: tytuł legendy
     - legend_title_fontsize: rozmiar tytułu legendy (domyślnie jak legend_fontsize)
     - legend_frame: czy rysować ramkę wokół legendy
-    - legend_mode: tryb legendy:
-        * "last"   – legenda tylko na ostatnim panelu,
-        * "axis"   – legenda na każdym panelu,
-        * "figure" – jedna legenda u góry całej figury,
-        * "right"  – jedna legenda po prawej stronie figury,
-        * "none"   – brak legendy.
+    - legend_enabled: czy pokazać legendę (po prawej) czy nie
     - legend_ncol: liczba kolumn w legendzie
-    - right_margin: prawy margines
+    - right_margin: prawy margines (miejsce na legendę po prawej)
     - sharex / sharey: współdzielenie osi między panelami
     """
 
+    # ------------------------------------------------------------------
+    # 1) Walidacja i przygotowanie danych
+    # ------------------------------------------------------------------
     if monthly_avg.empty:
         return
 
-    df = monthly_avg.copy()
-    df.index = pd.to_datetime(df.index)
-
-    groups = {year: df_y for year, df_y in df.groupby(df.index.year)}
-    candidate_years = years_order or sorted(groups.keys())
-    years = [
-        year for year in candidate_years
-        if year in groups and groups[year].notna().any().any()
-    ]
+    assert isinstance(monthly_avg.index, pd.DatetimeIndex), (
+        "Indeks musi być typu DatetimeIndex."
+    )
+    df = monthly_avg
+    groups, years = _group_by_year_with_data(df, years_order)
     if not years:
         return
 
-    ncols = max(1, int(ncols))
-    nrows = int((len(years) + ncols - 1) / ncols)
-    fig_w = panel_size[0] * ncols
-    fig_h = panel_size[1] * nrows
-    fig, axes = plt.subplots(
-        nrows=nrows,
+    # ------------------------------------------------------------------
+    # 2) Budowa układu paneli i ustawienia figury
+    # ------------------------------------------------------------------
+    fig, axes, _, _ = _build_panel_axes(
+        n_panels=len(years),
         ncols=ncols,
-        figsize=(fig_w, fig_h),
+        panel_size=panel_size,
         sharex=sharex,
         sharey=sharey,
+        hspace=hspace,
+        wspace=wspace,
     )
-    axes = (axes if isinstance(axes, (list, np.ndarray)) else [axes])
-    axes = list(np.array(axes).ravel())
-    fig.subplots_adjust(hspace=hspace, wspace=wspace)
-
     if main_title:
         fig.suptitle(
             main_title,
@@ -278,9 +271,10 @@ def plot_monthly_avg_station_mean_std_per_year(
             y=main_title_y,
             ha="center",
         )
-        if main_title_top is not None:
-            fig.subplots_adjust(top=main_title_top)
 
+    # ------------------------------------------------------------------
+    # 3) Rysowanie średniej i odchylenia standardowego
+    # ------------------------------------------------------------------
     legend_handles = {}
     mean_label = "Średnia stacji"
     std_label = "±1 std dev"
@@ -295,7 +289,6 @@ def plot_monthly_avg_station_mean_std_per_year(
             continue
 
         months = mean_all.index.month
-
         line = ax.plot(
             months,
             mean_all,
@@ -311,8 +304,13 @@ def plot_monthly_avg_station_mean_std_per_year(
             label=std_label,
         )
 
+        # Uchwyt do legendy – kolory i alfa jak na wykresie
         legend_handles[mean_label] = line
-        legend_handles[std_label] = Patch(facecolor=fill.get_facecolor()[0], alpha=0.3, label=std_label)
+        legend_handles[std_label] = Patch(
+            facecolor=fill.get_facecolor()[0],
+            alpha=0.3,
+            label=std_label,
+        )
 
         ax.set_xticks(range(1, 13))
         ax.set_xlabel("Miesiąc", fontsize=label_fontsize)
@@ -320,29 +318,13 @@ def plot_monthly_avg_station_mean_std_per_year(
         ax.set_title(f"Rok {year}", fontsize=title_fontsize)
         ax.grid(axis="y", linestyle="--", alpha=0.4)
 
-        if legend_mode == "axis":
-            leg = ax.legend(
-                title=legend_title,
-                fontsize=legend_fontsize,
-                ncol=legend_ncol,
-                frameon=legend_frame,
-            )
-            if legend_title_fontsize:
-                leg.get_title().set_fontsize(legend_title_fontsize)
-
+    # ------------------------------------------------------------------
+    # 4) Ukrycie pustych paneli + legenda zbiorcza (jeśli wybrana)
+    # ------------------------------------------------------------------
     for ax in axes[len(years):]:
         ax.set_visible(False)
 
-    if legend_mode == "last" and legend_handles and years:
-        leg = axes[len(years) - 1].legend(
-            title=legend_title,
-            fontsize=legend_fontsize,
-            ncol=legend_ncol,
-            frameon=legend_frame,
-        )
-        if legend_title_fontsize:
-            leg.get_title().set_fontsize(legend_title_fontsize)
-    elif legend_mode == "right" and legend_handles:
+    if legend_enabled and legend_handles:
         leg = fig.legend(
             handles=list(legend_handles.values()),
             labels=list(legend_handles.keys()),
@@ -356,20 +338,7 @@ def plot_monthly_avg_station_mean_std_per_year(
         if legend_title_fontsize:
             leg.get_title().set_fontsize(legend_title_fontsize)
         fig.subplots_adjust(right=right_margin)
-    elif legend_mode == "figure" and legend_handles:
-        leg = fig.legend(
-            handles=list(legend_handles.values()),
-            labels=list(legend_handles.keys()),
-            title=legend_title,
-            fontsize=legend_fontsize,
-            ncol=legend_ncol,
-            loc="upper center",
-            bbox_to_anchor=(0.5, 1.02),
-            frameon=legend_frame,
-        )
-        if legend_title_fontsize:
-            leg.get_title().set_fontsize(legend_title_fontsize)
-    # legend_mode == "none" -> brak legendy
+
     plt.show()
 
 
@@ -392,40 +361,26 @@ def plot_monthly_avg_station_comparison(
     jako wypełnienie wokół krzywej średniej dla każdego roku.
     """
 
+    # ------------------------------------------------------------------
+    # 1) Walidacja i przygotowanie danych
+    # ------------------------------------------------------------------
     if monthly_avg.empty:
         return
 
-    df = monthly_avg.copy()
-    df.index = pd.to_datetime(df.index)
-
-    groups = {year: df_y for year, df_y in df.groupby(df.index.year)}
-    candidate_years = years_order or sorted(groups.keys())
-    years = [
-        year for year in candidate_years
-        if year in groups and groups[year].notna().any().any()
-    ]
-
+    assert isinstance(monthly_avg.index, pd.DatetimeIndex), (
+        "Indeks musi być typu DatetimeIndex."
+    )
+    df = monthly_avg
+    groups, years = _group_by_year_with_data(df, years_order)
     if not years:
         return
 
-    plt.figure(figsize=figsize)
+    # ------------------------------------------------------------------
+    # 2) Rysowanie porównań na wspólnej osi
+    # ------------------------------------------------------------------
+    fig, ax = plt.subplots(figsize=figsize)
 
-    # Customowa colormapa, wyraźne, nasycone kolory dla 1-8 serii
-    colors = [
-        "#1f77b4",  # blue
-        "#ff7f0e",  # orange
-        "#2ca02c",  # green
-        "#d62728",  # red
-        "#9467bd",  # purple
-        "#8c564b",  # brown
-        "#e377c2",  # pink
-        "#7f7f7f",  # gray
-    ]
-    if len(years) > len(colors):
-        raise ValueError(
-            "plot_monthly_avg_station_comparison obsługuje max 1-8 serii / lat. "
-            f"Podano {len(years)}."
-        )
+    color_cycle = plt.get_cmap("Set1")(np.linspace(0, 1, len(years)))
 
     for idx, year in enumerate(years):
         df_y = groups.get(year)
@@ -434,17 +389,15 @@ def plot_monthly_avg_station_comparison(
 
         mean_all = df_y.mean(axis=1, skipna=True)
         std_all = df_y.std(axis=1, skipna=True)
-
         if not mean_all.notna().any():
             continue
 
         monthly_mean = mean_all.groupby(mean_all.index.month).mean()
         monthly_std = std_all.groupby(std_all.index.month).mean()
-
         months = monthly_mean.index
-        color = colors[idx]
+        color = color_cycle[idx]
 
-        plt.plot(
+        ax.plot(
             months,
             monthly_mean.values,
             marker="o",
@@ -452,7 +405,7 @@ def plot_monthly_avg_station_comparison(
             label=str(year),
             color=color,
         )
-        plt.fill_between(
+        ax.fill_between(
             months,
             (monthly_mean - monthly_std).values,
             (monthly_mean + monthly_std).values,
@@ -460,16 +413,23 @@ def plot_monthly_avg_station_comparison(
             color=color,
         )
 
-    plt.xticks(range(1, 13))
-    plt.xlabel("Miesiąc", fontsize=label_fontsize)
-    plt.ylabel("PM2.5 (średnia stacji) [mcg/m^3]", fontsize=label_fontsize)
-    plt.title("Miesięczne średnie (połączone stacje) – porównanie lat",
-              fontsize=title_fontsize)
-    plt.grid(axis="y", linestyle="--", alpha=0.4)
-    leg = plt.legend(title=legend_title, fontsize=legend_fontsize, frameon=legend_frame)
+    # ------------------------------------------------------------------
+    # 3) Opis osi, siatka i legenda
+    # ------------------------------------------------------------------
+    ax.set_xticks(range(1, 13))
+    ax.set_xlabel("Miesiąc", fontsize=label_fontsize)
+    ax.set_ylabel("PM2.5 (średnia stacji) [mcg/m^3]", fontsize=label_fontsize)
+    ax.set_title(
+        "Miesięczne średnie (połączone stacje) – porównanie lat",
+        fontsize=title_fontsize,
+    )
+    ax.grid(axis="y", linestyle="--", alpha=0.4)
+
+    leg = ax.legend(title=legend_title, fontsize=legend_fontsize, frameon=legend_frame)
     if legend_title_fontsize:
         leg.get_title().set_fontsize(legend_title_fontsize)
-    plt.tight_layout()
+
+    fig.tight_layout()
     plt.show()
 
 
@@ -483,109 +443,95 @@ def plot_city_monthly_averages(
     label_fontsize=10,
     title_fontsize=12,
     legend_fontsize="large",
-    legend_title="Miasto–Rok",
-    legend_title_fontsize=None,
     legend_frame=True,
-    city_colors=None,
-    year_alphas=None,
 ):
     """
     Rysuje średnie miesięczne dla wybranych miast i lat na jednym wykresie.
 
-    - Kolor rozróżnia miasto (bazowe: czerwony, zielony, niebieski, żółty, fioletowy).
-    - Rok rozróżniany jest przez wariant koloru: bazowy → pastelowy → neonowy.
-    - Opcjonalnie można też sterować przezroczystością (alpha).
+    - Kolor rozróżnia miasto (hue).
+    - Rok rozróżniany jest przez styl linii/marker (domyślny styl seaborn).
     - Dozwolone: 1–4 miasta i 1–3 lata (dla czytelności).
+
+    Parametry legendy:
+    - legend_fontsize / legend_frame: styl legendy
     """
 
-    df = monthly_avg_city.copy()
-    df.index = pd.to_datetime(df.index)
-    df.columns = df.columns.astype(str)
+    # ------------------------------------------------------------------
+    # 1) Walidacja i przygotowanie danych
+    # ------------------------------------------------------------------
+    assert isinstance(monthly_avg_city.index, pd.DatetimeIndex), (
+        "Indeks musi być typu DatetimeIndex."
+    )
+    df = monthly_avg_city
 
     if not (1 <= len(cities) <= 4):
         raise ValueError("Dozwolone są 1–4 miasta.")
     if not (1 <= len(years) <= 3):
         raise ValueError("Dozwolone są 1–3 lata.")
 
-    available_cities = set(df.columns)
-    missing = [c for c in cities if c not in available_cities]
-    if missing:
-        raise AssertionError(
-            "Brakujące miasta w monthly_avg_city columns: "
-            + ", ".join(missing)
-        )
-
-    # Kolory miast (bazowe)
-    default_city_colors = ["#e41a1c", "#2ca02c", "#1f77b4", "#ffd200", "#6a3d9a"]
-    city_colors = city_colors or default_city_colors
-    if len(city_colors) < len(cities):
-        raise ValueError("Za mało kolorów dla podanych miast.")
-
-    # Alpha dla lat (opcjonalnie)
-    if year_alphas is None:
-        year_alphas = [1.0] * len(years)
-    if len(year_alphas) < len(years):
-        raise ValueError("Za mało wartości alpha dla podanych lat.")
-
-    plt.figure(figsize=figsize)
-
-    def _pastelize(rgb, mix=0.65):
-        # Mieszamy z bielą, by uzyskać pastel
-        return tuple((1 - mix) * c + mix * 1.0 for c in rgb)
-
-    def _neonize(rgb):
-        # Wzmacniamy nasycenie i lekko podnosimy jasność
-        h, l, s = colorsys.rgb_to_hls(*rgb)
-        s = min(1.0, s * 1.9 + 0.2)
-        l = min(1.0, max(0.0, l * 0.9 + 0.15))
-        return colorsys.hls_to_rgb(h, l, s)
-
-    # Iteracja: miasto -> rok (kolor = miasto, wariant = rok)
-    for city_idx, city in enumerate(cities):
-        series_city = df[city]
-        color = city_colors[city_idx]
-        base_rgb = to_rgb(color)
-
-        for year_idx, year in enumerate(years):
-            s_y = series_city[series_city.index.year == year]
-            if not s_y.notna().any():
-                continue
-
-            months = s_y.index.month
-            label = f"{city} {year}"
-
-            if year_idx == 0:
-                year_color = base_rgb
-            elif year_idx == 1:
-                year_color = _pastelize(base_rgb)
-            else:
-                year_color = _neonize(base_rgb)
-
-            plt.plot(
-                months,
-                s_y.values,
-                marker="o",
-                markersize=marker_size,
-                linewidth=line_width,
-                color=year_color,
-                alpha=year_alphas[year_idx],
-                label=label,
-            )
-
-    plt.xticks(range(1, 13))
-    plt.xlabel("Miesiąc", fontsize=label_fontsize)
-    plt.ylabel("PM2.5 [mcg/m^3]", fontsize=label_fontsize)
-    plt.title("Średnie miesięczne dla miasta i roku", fontsize=title_fontsize)
-    plt.grid(axis="y", linestyle="--", alpha=0.4)
-    leg = plt.legend(
-        title=legend_title,
-        fontsize=legend_fontsize,
-        ncol=2,
-        frameon=legend_frame,
+    assert set(cities).issubset(set(df.columns)), (
+        "Brakujące miasta w monthly_avg_city columns."
     )
-    if legend_title_fontsize:
-        leg.get_title().set_fontsize(legend_title_fontsize)
-    plt.tight_layout()
+
+    # ------------------------------------------------------------------
+    # 2) Budowa tabeli pod seaborn
+    # ------------------------------------------------------------------
+    df_long = (
+        df[cities]
+        .assign(rok=df.index.year, miesiąc=df.index.month)
+        .melt(id_vars=["rok", "miesiąc"], var_name="miasto", value_name="pm25")
+    )
+    df_long = df_long[df_long["rok"].isin(years)]
+
+    if df_long["pm25"].notna().sum() == 0:
+        return
+
+    # ------------------------------------------------------------------
+    # 3) Wykres: hue=miasto, style=rok (seaborn)
+    # ------------------------------------------------------------------
+    fig, ax = plt.subplots(figsize=figsize)
+    sns.lineplot(
+        data=df_long,
+        x="miesiąc",
+        y="pm25",
+        hue="miasto",
+        style="rok",
+        hue_order=cities,
+        style_order=years,
+        legend="full",
+        linewidth=line_width,
+        markersize=marker_size,
+        ax=ax,
+    )
+
+    # ------------------------------------------------------------------
+    # 4) Opis osi, siatka i legenda
+    # ------------------------------------------------------------------
+    ax.set_xticks(range(1, 13))
+    ax.set_xlabel("Miesiąc", fontsize=label_fontsize)
+    ax.set_ylabel("PM2.5 [mcg/m^3]", fontsize=label_fontsize)
+    ax.set_title("Średnie miesięczne dla miasta i roku", fontsize=title_fontsize)
+    ax.grid(axis="y", linestyle="--", alpha=0.4)
+
+    # Legenda (2 kolumny)
+    handles, labels = ax.get_legend_handles_labels()
+    default_legend = ax.get_legend()
+    if default_legend:
+        default_legend.remove()
+
+    ax.legend(
+        handles,
+        labels,
+        loc="upper center",
+        bbox_to_anchor=(0.5, 0.98),
+        fontsize=legend_fontsize,
+        frameon=legend_frame,
+        ncol=2,
+        columnspacing=1.2,
+        handletextpad=0.6,
+        borderaxespad=0.0,
+    )
+
     plt.show()
 
 
@@ -599,10 +545,9 @@ def plot_city_monthly_heatmaps(
     legend_height=0.04,
 ):
     """
-    Rysuje mapy cieplne średnich miesięcznych dla miast w układzie podwykresów.
+    Rysuje heatmapy średnich miesięcznych dla miast w układzie paneli.
 
-    - Po prawej stronie każdego wiersza znajduje się osobna skala kolorów,
-      a pod nią legenda oznaczająca braki danych (NaN).
+    - Skala kolorów per wiersz
     - Układ może mieć 1 lub 2 kolumny paneli (parametr ncols).
 
     Parametry:
@@ -612,44 +557,39 @@ def plot_city_monthly_heatmaps(
     - legend_height: wysokość legendy w jednostkach figury (0..1)
     """
 
-    df = monthly_avg_city.copy()
-    df.index = pd.to_datetime(df.index)
-    df.columns = df.columns.astype(str)
-
-    years = sorted(set(years))
-
+    # ------------------------------------------------------------------
+    # 1) Walidacja wejścia i przygotowanie danych
+    # ------------------------------------------------------------------
     if ncols not in (1, 2):
         raise ValueError("ncols może być równe 1 albo 2.")
 
-    # Walidacja listy miast
-    available_cities = set(df.columns)
-    missing_cities = [c for c in cities if c not in available_cities]
-    if missing_cities:
-        raise AssertionError(
-            "Brakujące miasta w monthly_avg_city columns: "
-            + ", ".join(missing_cities)
-        )
+    assert isinstance(monthly_avg_city.index, pd.DatetimeIndex), (
+        "Indeks musi być typu DatetimeIndex."
+    )
+    assert monthly_avg_city.columns.is_unique, "Kolumny muszą być unikalne."
+    assert set(cities).issubset(set(monthly_avg_city.columns)), (
+        "Wszystkie miasta muszą być obecne w kolumnach."
+    )
+    years = sorted(set(years))
 
-    df = df[cities]
+    df = monthly_avg_city[cities]
     df = df[df.index.year.isin(years)]
 
-    # Indeks wielopoziomowy: (rok, miesiąc)
-    monthly = df.copy()
-    monthly.index = pd.MultiIndex.from_arrays(
-        [monthly.index.year, monthly.index.month],
-        names=["year", "month"],
-    )
-
-    if np.all(np.isnan(monthly.values)):
+    if df.isna().all().all():
         raise ValueError("Wszytkie średnie są NaN!")
 
-    # Wspólna skala kolorów dla wszystkich miast
-    vmin = np.nanmin(monthly.values)
-    vmax = np.nanmax(monthly.values)
+    # ------------------------------------------------------------------
+    # 2) Skala kolorów wspólna dla wszystkich paneli
+    # ------------------------------------------------------------------
+    vmin = np.nanmin(df.values)
+    vmax = np.nanmax(df.values)
 
     cmap = mpl.colormaps["YlOrRd"].copy()
     cmap.set_bad(color="lightgrey")  # NaN
 
+    # ------------------------------------------------------------------
+    # 3) Układ figury (siatka paneli + kolumna na colorbary)
+    # ------------------------------------------------------------------
     nrows = int(np.ceil(len(cities) / ncols))
     if figsize is None:
         heatmap_width = 5.2
@@ -668,32 +608,34 @@ def plot_city_monthly_heatmaps(
         hspace=0.35,
     )
 
+    # Element legendy dla braków danych
     nan_patch = Patch(
         facecolor="lightgrey",
         edgecolor="black",
         label="Brak danych (NaN)",
     )
 
+    # Osie dla map cieplnych oraz colorbary (po jednym na wiersz)
     row_axes = [[] for _ in range(nrows)]
-    row_cax = []
-    for row in range(nrows):
-        row_cax.append(fig.add_subplot(main_gs[row, ncols]))
+    row_cax = [fig.add_subplot(main_gs[row, ncols]) for row in range(nrows)]
 
+    # ------------------------------------------------------------------
+    # 4) Rysowanie map cieplnych
+    # ------------------------------------------------------------------
     for idx, city in enumerate(cities):
         row = idx // ncols
         col = idx % ncols
 
         ax = fig.add_subplot(main_gs[row, col])
         row_axes[row].append(ax)
-        s = monthly[city]
 
-        heat = s.unstack(level="month")
+        s = df[city]
+        heat = s.groupby([s.index.year, s.index.month]).mean().unstack()
         heat = heat.reindex(index=years, columns=range(1, 13))
-
         data = np.ma.masked_invalid(heat.values)
         nan_mask = np.isnan(heat.values)
 
-        im = ax.imshow(
+        ax.imshow(
             data,
             aspect="auto",
             origin="upper",
@@ -721,7 +663,9 @@ def plot_city_monthly_heatmaps(
         ax.set_ylabel("Rok")
         ax.set_title(f"Średnie miesięczne – {city}")
 
-    # Skale kolorów: po jednej na każdy wiersz
+    # ------------------------------------------------------------------
+    # 5) Colorbary – po jednym na każdy wiersz (wspólna skala)
+    # ------------------------------------------------------------------
     norm = mpl.colors.Normalize(vmin=vmin, vmax=vmax)
     sm = mpl.cm.ScalarMappable(norm=norm, cmap=cmap)
     for cax in row_cax:
@@ -730,50 +674,16 @@ def plot_city_monthly_heatmaps(
 
     fig.subplots_adjust(left=0.06, right=0.96, top=0.95, bottom=0.10)
 
-    # Legendy poniżej kolorbarów na poziomie etykiet osi X
-    fig.canvas.draw()
-    renderer = fig.canvas.get_renderer()
-    fig_h_px = fig.get_size_inches()[1] * fig.dpi
-
+    # ------------------------------------------------------------------
+    # 6) Legendy pod colorbarami
+    # ------------------------------------------------------------------
     for row, axes in enumerate(row_axes):
         if not axes:
             continue
-
-        # Pozycja osi X (ticki i etykieta) w pikselach
-        y0_candidates = []
-        label_boxes = []
-        for ax in axes:
-            for tick in ax.xaxis.get_ticklabels():
-                if tick.get_text():
-                    box = tick.get_window_extent(renderer)
-                    y0_candidates.append(box.y0)
-                    label_boxes.append(box)
-            if ax.xaxis.label.get_text():
-                box = ax.xaxis.label.get_window_extent(renderer)
-                y0_candidates.append(box.y0)
-                label_boxes.append(box)
-
-        if y0_candidates:
-            row_y0_px = min(y0_candidates)
-        else:
-            row_y0_px = min(ax.get_window_extent(renderer).y0 for ax in axes)
-
-        # Wysokość legendy w jednostkach figury
-        if y0_candidates:
-            label_h_px = max(box.height for box in label_boxes)
-            legend_h = max(legend_height, (label_h_px * 1.6) / fig_h_px)
-        else:
-            legend_h = legend_height
-
-        _, row_y0 = fig.transFigure.inverted().transform((0, row_y0_px))
-        if y0_candidates:
-            label_center = row_y0 + (label_h_px / 2) / fig_h_px
-            legend_y0 = label_center - legend_h / 2
-        else:
-            legend_y0 = row_y0 - legend_h * 0.1
-
+        row_bottom = min(ax.get_position().y0 for ax in axes)
+        legend_y0 = max(0.0, row_bottom - legend_height + 0.015)
         cax_pos = row_cax[row].get_position()
-        lax = fig.add_axes([cax_pos.x0, legend_y0, cax_pos.width, legend_h])
+        lax = fig.add_axes([cax_pos.x0, legend_y0, cax_pos.width, legend_height])
         lax.axis("off")
         lax.legend(
             handles=[nan_patch],
@@ -790,7 +700,7 @@ def plot_extreme_stations_days_over(
     year_ref=2024,
     years=(2014, 2019, 2024),
     n=3,
-    station_city_map=None,
+    station_metadata=None,
 ):
     """
     Rysuje wykres słupkowy dla n najlepszych i n najgorszych stacji (dni > próg).
@@ -800,87 +710,91 @@ def plot_extreme_stations_days_over(
     - year_ref: rok referencyjny do wyboru stacji skrajnych
     - years: lata do pokazania na wykresie (kolory słupków)
     - n: liczba najlepszych i najgorszych stacji z roku referencyjnego
-    - station_city_map: mapowanie {kod stacji -> miasto} lub Series/DataFrame
-      z kolumnami "Kod stacji" i "Miejscowość"
+    - station_metadata: DataFrame z kolumnami "Kod stacji" i "Miejscowość"
+      (np. metadata_combined) lub mapowanie/Series kod->miasto
     """
 
-    df = days_over_df.copy()
+    # ------------------------------------------------------------------
+    # 1) Walidacja wejścia
+    # ------------------------------------------------------------------
+    df = days_over_df
 
-    # Walidacja lat
     if year_ref not in df.columns:
         raise ValueError(f"Rok bazowy {year_ref} nieobecny w days_over_df.columns")
     for y in years:
         if y not in df.columns:
             raise ValueError(f"Rok {y} nieobecny w days_over_df.columns")
 
-    # Przygotuj mapowanie stacja -> miasto
-    if station_city_map is None:
-        raise ValueError("Wymagane jest station_city_map (kod stacji -> miasto).")
-    if isinstance(station_city_map, pd.DataFrame):
-        if not {"Kod stacji", "Miejscowość"}.issubset(station_city_map.columns):
-            raise ValueError(
-                "station_city_map jako DataFrame musi mieć kolumny "
-                "'Kod stacji' i 'Miejscowość'."
-            )
-        mapping = (
-            station_city_map.assign(
-                **{
-                    "Kod stacji": station_city_map["Kod stacji"].astype(str).str.strip(),
-                    "Miejscowość": station_city_map["Miejscowość"].astype(str),
-                }
-            )
-            .drop_duplicates("Kod stacji")
-            .set_index("Kod stacji")["Miejscowość"]
-            .to_dict()
+    # ------------------------------------------------------------------
+    # 2) Mapowanie stacji na miasta
+    # ------------------------------------------------------------------
+    assert isinstance(station_metadata, pd.DataFrame), (
+        "station_metadata musi być DataFrame z kolumnami 'Kod stacji' i 'Miejscowość'."
+    )
+    assert {"Kod stacji", "Miejscowość"}.issubset(station_metadata.columns), (
+        "station_metadata musi zawierać kolumny 'Kod stacji' i 'Miejscowość'."
+    )
+    mapping = (
+        station_metadata.assign(
+            **{
+                "Kod stacji": station_metadata["Kod stacji"].astype(str).str.strip(),
+                "Miejscowość": station_metadata["Miejscowość"].astype(str),
+            }
         )
-    elif isinstance(station_city_map, pd.Series):
-        ser = station_city_map.copy()
-        ser.index = ser.index.astype(str).str.strip()
-        mapping = ser.to_dict()
-    else:
-        mapping = {str(k).strip(): v for k, v in dict(station_city_map).items()}
+        .drop_duplicates("Kod stacji")
+        .set_index("Kod stacji")["Miejscowość"]
+        .to_dict()
+    )
 
-    # n najlepszych i n najgorszych stacji w year_ref
+    # ------------------------------------------------------------------
+    # 3) Wybór stacji skrajnych (n najlepszych i n najgorszych)
+    # ------------------------------------------------------------------
     s_ref = df[year_ref].dropna()
     lowest = s_ref.nsmallest(n)
     highest = s_ref.nlargest(n)
-
     stations_sel = pd.Index(lowest.index.tolist() + highest.index.tolist()).unique()
     df_sel = df.loc[stations_sel, years]
 
-    # Etykiety stacji z miastem
-    missing_cities = []
-    for s in stations_sel:
-        if s not in mapping:
-            missing_cities.append(s)
-            continue
-        city_val = mapping[s]
-        if pd.isna(city_val) or str(city_val).strip() == "" or str(city_val).strip().lower() == "nan":
-            missing_cities.append(s)
-    if missing_cities:
-        raise ValueError(
-            "Brak miasta dla stacji: " + ", ".join(missing_cities)
+    # Sprawdzenie, czy dla każdej stacji mamy miasto
+    missing_cities = [
+        s for s in stations_sel
+        if (
+            s not in mapping
+            or pd.isna(mapping[s])
+            or str(mapping[s]).strip() == ""
+            or str(mapping[s]).strip().lower() == "nan"
         )
-    station_labels = [f"{s}\n({str(mapping[s]).strip()})" for s in stations_sel]
+    ]
+    if missing_cities:
+        raise ValueError("Brak miasta dla stacji: " + ", ".join(missing_cities))
 
-    # Wykres słupkowy grupowany
+    # Stacja \n (miasto)
+    station_labels = [
+        f"{s}\n({str(mapping[s]).strip()})"
+        for s in stations_sel
+    ]
+
+    # ------------------------------------------------------------------
+    # 4) Rysowanie wykresu słupkowego grupowanego
+    # ------------------------------------------------------------------
     x = np.arange(len(stations_sel))
     n_years = len(years)
     width = 0.8 / n_years
 
-    plt.figure(figsize=(12, 6))
+    fig, ax = plt.subplots(figsize=(12, 6))
     for i, y in enumerate(years):
         x_shift = x + (i - (n_years - 1) / 2) * width
-        plt.bar(x_shift, df_sel[y].values, width=width, label=str(y))
+        ax.bar(x_shift, df_sel[y].values, width=width, label=str(y))
 
-    # Etykiety poziome z nazwą stacji i miastem
-    plt.xticks(x, station_labels, rotation=0, ha="center")
-    plt.xlabel("Stacja (miasto)")
-    plt.ylabel("Liczba dni powyżej normy dobowej")
-    plt.title(
+    ax.set_xticks(x)
+    ax.set_xticklabels(station_labels, rotation=0, ha="center")
+    ax.set_xlabel("Stacja (miasto)")
+    ax.set_ylabel("Liczba dni powyżej normy dobowej")
+    ax.set_title(
         f"Liczba dni powyżej normy – najlepsze / najgorsze stacje z roku {year_ref}"
     )
-    plt.legend(title="Rok")
-    plt.grid(axis="y", linestyle="--", alpha=0.4)
-    plt.tight_layout()
+    ax.legend(title="Rok")
+    ax.grid(axis="y", linestyle="--", alpha=0.4)
+
+    fig.tight_layout()
     plt.show()
