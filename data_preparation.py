@@ -5,7 +5,7 @@ import io
 import hashlib
 
 # funkcja do ściągania podanego archiwum
-def download_gios_archive(archive_url, filename, sha256=None):
+def download_gios_archive(archive_url, filename, sha256=None, show_hashes=False):
     """
     Pobiera archiwum ZIP z danymi GIOŚ i wczytuje wskazany plik Excela.
 
@@ -15,6 +15,8 @@ def download_gios_archive(archive_url, filename, sha256=None):
       pomija weryfikację
     - filename: nazwa pliku w archiwum ZIP; typowa (zwykle oczekiwana) nazwa to
       <YEAR>_PM2.5_1g.xlsx
+    - show_hashes: gdy True, wypisz obliczony hash archiwum (niezależnie od tego,
+      czy podano oczekiwany sha256)
     """
     response = requests.get(archive_url)
     response.raise_for_status()  # jeśli błąd HTTP, zatrzymaj
@@ -28,8 +30,14 @@ def download_gios_archive(archive_url, filename, sha256=None):
     if content_type and "text/html" in content_type.lower():
         raise ValueError(f"Nieprawidłowy Content-Type: {content_type}\nOczekiwany: application/zip")
 
-    if sha256: # skip check gdy nie podano hasha
+    # Hash liczony tylko gdy potrzebnytrzeba: do walidacji lub gdy show_hashes=True
+    actual_hash = None
+    if sha256 or show_hashes:
         actual_hash = hashlib.sha256(response.content).hexdigest()
+    if show_hashes and actual_hash:
+        print(f"SHA256 pobranego archiwum: {actual_hash}")
+
+    if sha256: # skip check gdy nie podano hasha
         if actual_hash.lower() != sha256.lower():
             raise ValueError(f"SHA256 nieprawidłowy! Plik: {actual_hash}")
 
