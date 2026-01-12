@@ -37,9 +37,10 @@ def test_download_success_with_hash(monkeypatch):
     def fake_get(url):
         return DummyResponse(content=content, headers={"Content-Type": "application/zip"})
 
-    def fake_read_excel(f, header=None):
+    def fake_read_excel(f, header=None, **kwargs):
         assert header is None
         assert hasattr(f, "read")
+        assert kwargs.get("dtype") == {0: str}
         return pd.DataFrame({"ok": [1]})
 
     monkeypatch.setattr(requests, "get", fake_get)
@@ -55,7 +56,8 @@ def test_download_success_without_hash(monkeypatch):
     def fake_get(url):
         return DummyResponse(content=content, headers={"Content-Type": "application/zip"})
 
-    def fake_read_excel(f, header=None):
+    def fake_read_excel(f, header=None, **kwargs):
+        assert kwargs.get("dtype") == {0: str}
         return pd.DataFrame({"ok": [1]})
 
     monkeypatch.setattr(requests, "get", fake_get)

@@ -3,6 +3,7 @@ import requests
 import zipfile
 import io
 import hashlib
+import warnings
 
 # funkcja do ściągania podanego archiwum
 def download_gios_archive(archive_url, filename, sha256=None, show_hashes=False):
@@ -47,7 +48,7 @@ def download_gios_archive(archive_url, filename, sha256=None, show_hashes=False)
 
         with z.open(filename) as f:
             try:
-                df = pd.read_excel(f, header=None)
+                df = pd.read_excel(f, header=None, dtype={0: str})
             except Exception as e:
                 raise RuntimeError(
                     f"Błąd przy wczytywaniu pliku {filename} z archiwum."
@@ -75,12 +76,21 @@ def split_raw_df_to_metadata_and_measurements(raw_df, meta_keys=None):
     stations = data[is_metadata.values].T
     stations.columns = labels[is_metadata].values
     
-    measurements = data[is_datapoint.values]
-    measurements.index = pd.to_datetime(
-        labels[is_datapoint].values,
+    # Ujednolicenie znaczników czasu: usuwamy ewentualne mikrosekundy (.xxxxxx)
+    ts_raw = labels[is_datapoint].astype(str).str.strip()
+    ts_sanitized = ts_raw.str.replace(r"\.\d+$", "", regex=True)
+    ts_parsed = pd.to_datetime(
+        ts_sanitized,
         format="%Y-%m-%d %H:%M:%S",
         errors="coerce",
     )
+    if ts_parsed.isna().any():
+        bad_samples = ts_raw[ts_parsed.isna()].head(5).tolist()
+        raise AssertionError(
+            "Niepoprawne znaczniki czasu po parsowaniu. "
+            "Oczekiwany format: YYYY-MM-DD HH:MM:SS. "
+            f"Przykłady: {bad_samples}"
+        )
     
     if "Kod stacji" in stations.columns:
         station_codes = stations["Kod stacji"].values
@@ -88,11 +98,50 @@ def split_raw_df_to_metadata_and_measurements(raw_df, meta_keys=None):
         station_codes = data.columns
     measurements = data[is_datapoint.values].copy()
     measurements.columns = station_codes
-    measurements.index = pd.to_datetime(
-        labels[is_datapoint].values,
-        format="%Y-%m-%d %H:%M:%S",
-        errors="coerce",
-    )
+    measurements.index = ts_parsed
+
+    # Walidacja i przycięcie: wiersze spoza głównego roku są usuwane
+    years_in_data = measurements.index.year.dropna()
+    if not years_in_data.empty:
+        year_counts = years_in_data.value_counts()
+        main_year = int(year_counts.idxmax())
+        extra_years = sorted(set(year_counts.index) - {main_year})
+        bad_samples = (
+            measurements.index[measurements.index.year != main_year]
+            .astype(str)
+            .tolist()[:5]
+        )
+        if extra_years:
+            msg = (
+                "Wykryto wiersze spoza głównego roku "
+                f"{main_year}. Dodatkowe lata: {extra_years}. "
+                f"Przykłady: {bad_samples}"
+            )
+            warnings.warn(msg, UserWarning)
+            print(msg)
+        measurements = measurements.loc[measurements.index.year == main_year]
+
+    # Normalizacja wartości pomiarów: przecinek -> kropka, puste -> NaN
+    measurements = measurements.replace(r"^\s*$", pd.NA, regex=True)
+    measurements = measurements.replace(",", ".", regex=True)
+
+    # cast do wartości liczbowych i walidacja NaN
+    measurements_raw = measurements.copy()
+    before_nan = measurements_raw.isna()
+    measurements = measurements.apply(pd.to_numeric, errors="coerce")
+    new_nan_mask = measurements.isna() & ~before_nan
+    if new_nan_mask.any().any():
+        bad_samples = (
+            measurements_raw.where(new_nan_mask)
+            .stack()
+            .head(5)
+            .astype(str)
+            .tolist()
+        )
+        raise AssertionError(
+            "Niepoprawne wartości pomiarów (nie da się przekonwertować na liczby). "
+            f"Przykłady: {bad_samples}"
+        )
 
     return stations, measurements
 
