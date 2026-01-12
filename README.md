@@ -1,5 +1,7 @@
 # Projekt 3 – analiza jakości powietrza
 
+[![pytest](https://github.com/vardwyn/ZTP_projekt3/actions/workflows/pytest.yml/badge.svg)](https://github.com/vardwyn/ZTP_projekt3/actions/workflows/pytest.yml)
+
 Refaktoryzacja notebooka do modułów Pythona i notebooka orkiestrującego.
 
 ## Uruchamianie
