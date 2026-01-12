@@ -13,7 +13,8 @@ from matplotlib.patches import Patch
 
 def _group_by_year_with_data(df: pd.DataFrame, years_order=None):
     """
-    Grupuje dane po roku i zwraca:
+    Grupuje dane po roku i zwraca przygotowane grupy.
+
     - słownik {rok -> ramka danych}
     - listę lat z co najmniej jedną nie-NaN wartością
     """
@@ -37,6 +38,7 @@ def _build_panel_axes(
 ):
     """
     Tworzy figurę i spłaszczoną listę osi dla paneli.
+
     Zwraca: (fig, axes_list, nrows, ncols).
     """
     ncols = max(1, int(ncols))
@@ -213,8 +215,7 @@ def plot_monthly_avg_station_mean_std_per_year(
     sharex=False,
 ):
     """
-    Rysuje miesięczne średnie i odchylenia standardowe (po stacjach) dla każdego roku
-    jako jeden wykres z wieloma panelami.
+    Rysuje miesięczne średnie i odchylenia standardowe (po stacjach) dla każdego roku jako wykres z wieloma panelami.
 
     Parametry:
     - main_title: tytuł całego wykresu (None = brak tytułu)

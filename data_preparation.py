@@ -59,7 +59,8 @@ def download_gios_archive(archive_url, filename, sha256=None, show_hashes=False)
 
 def split_raw_df_to_metadata_and_measurements(raw_df, meta_keys=None):
     """
-    Dzieli surowy DataFrame z danymi GIOŚ na:
+    Dzieli surowy DataFrame z danymi GIOŚ na metadane i pomiary.
+
     - metadane stacji (kolumny opisowe),
     - pomiary (wiersze czasowe, kolumny = kody stacji).
 
