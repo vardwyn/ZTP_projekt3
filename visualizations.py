@@ -811,9 +811,7 @@ def plot_pm25_days_over_by_voivodeship_years(
     threshold: float = 25.0,
 ):
     """
-    Liczba dni z przekroczeniem normy PM2.5,
-    liczona poprawnie: dzień = 1 na województwo,
-    niezależnie od liczby stacji.
+    Liczba dni z przekroczeniem normy PM2.5
     """
 
     # ------------------------------------------------------------
@@ -876,7 +874,7 @@ def plot_pm25_days_over_by_voivodeship_years(
     ax.set_xticklabels(days_over_voiv.index, rotation=45, ha="right")
     ax.set_xlabel("Województwo")
     ax.set_ylabel("Liczba dni z przekroczeniem normy PM2.5")
-    ax.set_title("Liczba dni z przekroczeniem normy PM2.5 – województwa (poprawnie)")
+    ax.set_title("Liczba dni z przekroczeniem normy PM2.5 – województwa")
 
     ax.legend(title="Rok")
     ax.grid(axis="y", linestyle="--", alpha=0.4)
