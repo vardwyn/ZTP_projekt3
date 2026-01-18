@@ -799,3 +799,85 @@ def plot_extreme_stations_days_over(
 
     fig.tight_layout()
     plt.show()
+
+#### MODIFIED
+
+def plot_pm25_days_over_by_voivodeship_years(
+    meas_df: pd.DataFrame,
+    metadata_df: pd.DataFrame,
+    years: list[int],
+    threshold: float = 15.0,
+):
+    """
+    Liczba dni z przekroczeniem normy PM2.5
+    """
+
+    # ------------------------------------------------------------
+    # 1. Przygotowanie dobowych średnich
+    # ------------------------------------------------------------
+    df = meas_df.copy()
+    df.index = df.index - pd.Timedelta(hours=1)
+    df.index = df.index.normalize()
+
+    daily_mean = df.groupby(df.index).mean()
+    daily_over = daily_mean.gt(threshold)
+
+    # ------------------------------------------------------------
+    # 2. Mapowanie stacja → województwo
+    # ------------------------------------------------------------
+    meta = metadata_df.copy()
+    meta["Kod stacji"] = meta["Kod stacji"].astype(str).str.strip()
+
+    station_to_voiv = (
+        meta.drop_duplicates("Kod stacji")
+            .set_index("Kod stacji")["Województwo"]
+    )
+
+    missing = sorted(set(daily_over.columns) - set(station_to_voiv.index))
+    if missing:
+        raise AssertionError(
+            "Brak województwa dla stacji: " + ", ".join(missing)
+        )
+
+    daily_over.columns = daily_over.columns.map(station_to_voiv)
+
+    # ------------------------------------------------------------
+    # 3. AGREGACJA : województwo × dzień (any)
+    # ------------------------------------------------------------
+    voiv_daily_over = daily_over.groupby(axis=1, level=0).any()
+
+    # ------------------------------------------------------------
+    # 4. Zliczanie dni w latach
+    # ------------------------------------------------------------
+    result = {}
+    for year in years:
+        mask = voiv_daily_over.index.year == year
+        result[year] = voiv_daily_over.loc[mask].sum()
+
+    days_over_voiv = pd.DataFrame(result).sort_index()
+
+    # ------------------------------------------------------------
+    # 5. Wykres
+    # ------------------------------------------------------------
+    x = np.arange(len(days_over_voiv.index))
+    width = 0.8 / len(years)
+
+    fig, ax = plt.subplots(figsize=(16, 6))
+
+    for i, year in enumerate(years):
+        shift = x + (i - (len(years) - 1) / 2) * width
+        ax.bar(shift, days_over_voiv[year], width=width, label=str(year))
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(days_over_voiv.index, rotation=45, ha="right")
+    ax.set_xlabel("Województwo")
+    ax.set_ylabel("Liczba dni z przekroczeniem normy PM2.5")
+    ax.set_title("Liczba dni z przekroczeniem normy PM2.5 – województwa")
+
+    ax.legend(title="Rok")
+    ax.grid(axis="y", linestyle="--", alpha=0.4)
+
+    fig.tight_layout()
+    plt.show()
+
+    return days_over_voiv
