@@ -5,6 +5,7 @@ import matplotlib as mpl
 import seaborn as sns
 from matplotlib import gridspec
 from matplotlib.patches import Patch
+from statistics_calculation import shift_midnight_to_previous_day
 
 
 # ============================================================
@@ -816,8 +817,7 @@ def plot_pm25_days_over_by_voivodeship_years(
     # 1. Przygotowanie dobowych średnich
     # ------------------------------------------------------------
     df = meas_df.copy()
-    df.index = df.index - pd.Timedelta(hours=1)
-    df.index = df.index.normalize()
+    df.index = shift_midnight_to_previous_day(df.index).normalize()
 
     daily_mean = df.groupby(df.index).mean()
     daily_over = daily_mean.gt(threshold)
