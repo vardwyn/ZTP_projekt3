@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from statistics_calculation import (
+from pm25.statistics_calculation import (
     analyze_raw_df,
     check_timestamps,
     monthly_avg_with_nan_threshold,

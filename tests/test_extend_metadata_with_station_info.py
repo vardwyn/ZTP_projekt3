@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from data_preparation import extend_metadata_with_station_info
+from pm25.data_preparation import extend_metadata_with_station_info
 
 
 def make_metadata():

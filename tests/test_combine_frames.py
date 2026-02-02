@@ -1,6 +1,6 @@
 import pandas as pd
 
-from data_preparation import combine_metadata_frames, combine_data_frames
+from pm25.data_preparation import combine_metadata_frames, combine_data_frames
 
 
 def test_combine_metadata_frames_basic_intersection():

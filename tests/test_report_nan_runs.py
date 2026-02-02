@@ -1,6 +1,6 @@
 import pandas as pd
 
-from statistics_calculation import report_nan_runs
+from pm25.statistics_calculation import report_nan_runs
 
 
 def test_report_nan_runs_basic():

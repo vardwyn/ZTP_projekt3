@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 import requests
 
-from data_preparation import download_updated_metadata
+from pm25.data_preparation import download_updated_metadata
 
 
 class DummyResponse:

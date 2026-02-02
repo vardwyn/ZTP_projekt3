@@ -1,6 +1,6 @@
 import pandas as pd
 
-from statistics_calculation import (
+from pm25.statistics_calculation import (
     shift_midnight_to_previous_day,
     count_days_over_threshold,
     monthly_avg_with_nan_threshold,

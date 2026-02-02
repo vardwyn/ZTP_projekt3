@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from data_preparation import split_raw_df_to_metadata_and_measurements
+from pm25.data_preparation import split_raw_df_to_metadata_and_measurements
 
 
 def make_raw_df():

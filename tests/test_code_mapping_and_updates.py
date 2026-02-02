@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from data_preparation import (
+from pm25.data_preparation import (
     build_station_code_mapping,
     update_station_names_metadata,
     update_station_names_data,

@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 import requests
 
-from data_preparation import download_gios_archive
+from pm25.data_preparation import download_gios_archive
 
 
 # Pseudo-wrapper dla zastąpienia requests.get i requests.raise_for_status w testach

@@ -5,7 +5,7 @@ import matplotlib as mpl
 import seaborn as sns
 from matplotlib import gridspec
 from matplotlib.patches import Patch
-from statistics_calculation import shift_midnight_to_previous_day
+from .statistics_calculation import shift_midnight_to_previous_day
 
 
 # ============================================================
