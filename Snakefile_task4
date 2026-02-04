@@ -1,0 +1,24 @@
+configfile: "config/task4.yaml"
+
+YEARS = config["years"]
+QUERIES_FILE = config["pubmed"].get("queries_file", "config/pubmed_queries.yaml")
+
+
+rule all:
+    input:
+        expand("results/literature/{year}/pubmed_papers.csv", year=YEARS),
+        expand("results/literature/{year}/summary_by_year.csv", year=YEARS),
+        expand("results/literature/{year}/top_journals.csv", year=YEARS),
+
+
+rule pubmed_year:
+    input:
+        queries=QUERIES_FILE,
+    output:
+        papers="results/literature/{year}/pubmed_papers.csv",
+        summary="results/literature/{year}/summary_by_year.csv",
+        journals="results/literature/{year}/top_journals.csv",
+    params:
+        config="config/task4.yaml",
+    shell:
+        "python src/literature/pubmed_fetch.py --year {wildcards.year} --config {params.config}"

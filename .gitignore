@@ -3,3 +3,4 @@
 **/*.pyo
 **/*.pyd
 **/.ipynb_checkpoints/
+**/.snakemake/
