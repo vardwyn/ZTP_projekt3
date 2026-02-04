@@ -1,0 +1,14 @@
+years: [2021, 2024]
+
+# Parametry obliczeń / normalizacji dla części PM2.5
+pm25:
+  daily_threshold: 15
+  max_nan_per_month: 5
+
+# Parametry PubMed (NCBI Entrez)
+pubmed:
+  email: "Karol.Kempny@students.mimuw.edu.pl"
+  api_key: ""
+  tool: "ztp-projekt4"
+  retmax: 200
+  queries_file: "config/pubmed_queries.yaml"
