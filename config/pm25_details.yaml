@@ -1,0 +1,58 @@
+raw_data_dir: "data/raw_data"
+cleaned_data_dir: "data/cleaned_data"
+
+# Archiwa z danymi GIOŚ
+archives:
+  2014:
+    url: "https://powietrze.gios.gov.pl/pjp/archives/downloadFile/302"
+    filename: "2014_PM2.5_1g.xlsx"
+    sha256: "8cabcc2118f019d8d1c0998561c01d57eda8c0a4c531cd2158b18522cd1aed27"
+  2015:
+    url: "https://powietrze.gios.gov.pl/pjp/archives/downloadFile/236"
+    filename: "2015_PM25_1g.xlsx"
+    sha256: null
+  2018:
+    url: "https://powietrze.gios.gov.pl/pjp/archives/downloadFile/603"
+    filename: "2018_PM25_1g.xlsx"
+    sha256: null
+  2019:
+    url: "https://powietrze.gios.gov.pl/pjp/archives/downloadFile/322"
+    filename: "2019_PM25_1g.xlsx"
+    sha256: "777bc03c3c6d1ac77bd4353a80b6e064506368d42be19edece60f040c17dba1c"
+  2021:
+    url: "https://powietrze.gios.gov.pl/pjp/archives/downloadFile/486"
+    filename: "2021_PM25_1g.xlsx"
+    sha256: null
+  2024:
+    url: "https://powietrze.gios.gov.pl/pjp/archives/downloadFile/582"
+    filename: "2024_PM25_1g.xlsx"
+    sha256: "571dfa56866388c2904284ca6029bbf6016af3905b95bcacc5b3b6f6fa2d00e1"
+
+# Metadane stacji
+updated_metadata_url: "https://powietrze.gios.gov.pl/pjp/archives/downloadFile/622"
+updated_metadata_sha256: "174290b98ceb780c69769806f7f7a6054015cd78ead8ee65746f3fceba66b2ab"
+updated_metadata_path: "data/raw_data/raw_updated_metadata_20251230.csv.xz"
+
+# Parametry obliczeń
+daily_threshold: 15
+max_nan_per_month: 240
+
+# Stacje wykluczane przy liczeniu przekroczeń
+exclude_stations:
+  - "MzSiedKonars"
+  - "PmGdaLeczkow"
+
+# Kolumny do rozszerzania metadanych
+extra_metadata_cols:
+  - "Typ stacji"
+  - "Typ obszaru"
+  - "Rodzaj stacji"
+  - "Województwo"
+  - "Miejscowość"
+  - "WGS84 φ N"
+  - "WGS84 λ E"
+
+# Zmiana nazw kolumn geograficznych
+rename_geo:
+  "WGS84 φ N": "Szerokość geograficzna"
+  "WGS84 λ E": "Długość geograficzna"

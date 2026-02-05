@@ -147,6 +147,47 @@ def split_raw_df_to_metadata_and_measurements(raw_df, meta_keys=None):
     return stations, measurements
 
 
+def clean_raw_year(
+    raw_df,
+    updated_metadata_df,
+    year,
+    extra_cols=None,
+    rename_geo=None,
+):
+    """
+    Czyści surowe dane dla jednego roku i zwraca:
+    - data_updated: pomiary po ujednoliceniu kodów stacji,
+    - meta_extended: metadane rozszerzone o dodatkowe kolumny.
+    """
+    meta_keys = [
+        "Nr",
+        "Kod stacji",
+        "Wskaźnik",
+        "Czas uśredniania",
+        "Jednostka",
+        "Czas pomiaru",
+        "Kod stanowiska",
+    ]
+    meta_df, data_df = split_raw_df_to_metadata_and_measurements(raw_df, meta_keys)
+
+    code_map = build_station_code_mapping(updated_metadata_df, verbose=False)
+    meta_updated = update_station_names_metadata(
+        meta_df, updated_metadata_df, code_map, label=str(year)
+    )
+    data_updated = update_station_names_data(
+        data_df, code_map, label=str(year)
+    )
+
+    extra_cols = extra_cols or ["Miejscowość", "Województwo"]
+    meta_extended = extend_metadata_with_station_info(
+        meta_updated, updated_metadata_df, extra_cols, label=str(year)
+    )
+    if rename_geo:
+        meta_extended = meta_extended.rename(columns=rename_geo)
+
+    return data_updated, meta_extended
+
+
 def download_updated_metadata(metadata_url, sha256=None):
     """
     Pobiera aktualne metadane stacji i zwraca je jako DataFrame.

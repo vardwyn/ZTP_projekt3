@@ -2,6 +2,11 @@ configfile: "config/task4.yaml"
 
 YEARS = config["years"]
 QUERIES_FILE = config["pubmed"].get("queries_file", "config/pubmed_queries.yaml")
+REPORT_TEMPLATE = "config/report_task4_template.md"
+REPORT_MD = "results/report_task4.md"
+REPORT_PDF = "results/report_task4.pdf"
+REPORT_TREND_PLOT = "results/report_task4/figures/literature_counts_by_year.png"
+REPORT_TOPJ_PLOT = "results/report_task4/figures/top_journals_trend.png"
 
 
 rule all:
@@ -9,6 +14,15 @@ rule all:
         expand("results/literature/{year}/pubmed_papers.csv", year=YEARS),
         expand("results/literature/{year}/summary_by_year.csv", year=YEARS),
         expand("results/literature/{year}/top_journals.csv", year=YEARS),
+        expand("results/pm25/{year}/exceedance_days.csv", year=YEARS),
+        expand("results/pm25/{year}/figures/monthly_avg_station.png", year=YEARS),
+        expand("results/pm25/{year}/figures/monthly_avg_station_mean_std.png", year=YEARS),
+        expand("results/pm25/{year}/figures/monthly_avg_station_comparison.png", year=YEARS),
+        expand("results/pm25/{year}/figures/city_monthly_averages.png", year=YEARS),
+        expand("results/pm25/{year}/figures/extreme_stations_days_over.png", year=YEARS),
+        expand("results/pm25/{year}/figures/voivodeship_days_over.png", year=YEARS),
+        REPORT_MD,
+        REPORT_PDF,
 
 
 rule pubmed_year:
@@ -22,3 +36,53 @@ rule pubmed_year:
         config="config/task4.yaml",
     shell:
         "python src/literature/pubmed_fetch.py --year {wildcards.year} --config {params.config}"
+
+
+rule pm25_year:
+    output:
+        days="results/pm25/{year}/exceedance_days.csv",
+        station="results/pm25/{year}/figures/monthly_avg_station.png",
+        mean_std="results/pm25/{year}/figures/monthly_avg_station_mean_std.png",
+        comparison="results/pm25/{year}/figures/monthly_avg_station_comparison.png",
+        city="results/pm25/{year}/figures/city_monthly_averages.png",
+        heat="results/pm25/{year}/figures/city_monthly_heatmaps.png",
+        extreme="results/pm25/{year}/figures/extreme_stations_days_over.png",
+        voiv="results/pm25/{year}/figures/voivodeship_days_over.png",
+    params:
+        config="config/task4.yaml",
+    shell:
+        "python src/pm25/pm25_year.py --year {wildcards.year} --config {params.config}"
+
+
+rule report_task4:
+    input:
+        template=REPORT_TEMPLATE,
+        reporter="src/report.py",
+        lit_papers=expand("results/literature/{year}/pubmed_papers.csv", year=YEARS),
+        lit_summary=expand("results/literature/{year}/summary_by_year.csv", year=YEARS),
+        lit_journals=expand("results/literature/{year}/top_journals.csv", year=YEARS),
+        pm25_days=expand("results/pm25/{year}/exceedance_days.csv", year=YEARS),
+        pm25_figs=expand("results/pm25/{year}/figures/monthly_avg_station.png", year=YEARS),
+        pm25_meanstd=expand("results/pm25/{year}/figures/monthly_avg_station_mean_std.png", year=YEARS),
+        pm25_comp=expand("results/pm25/{year}/figures/monthly_avg_station_comparison.png", year=YEARS),
+        pm25_city=expand("results/pm25/{year}/figures/city_monthly_averages.png", year=YEARS),
+        pm25_ext=expand("results/pm25/{year}/figures/extreme_stations_days_over.png", year=YEARS),
+        pm25_voiv=expand("results/pm25/{year}/figures/voivodeship_days_over.png", year=YEARS),
+    output:
+        md=REPORT_MD,
+        trend=REPORT_TREND_PLOT,
+        topj=REPORT_TOPJ_PLOT,
+    params:
+        config="config/task4.yaml",
+    shell:
+        "python src/report.py --config {params.config} --template {input.template} --output {output.md}"
+
+
+rule report_task4_pdf:
+    input:
+        md=REPORT_MD,
+        renderer="src/render_report_pdf.py",
+    output:
+        pdf=REPORT_PDF,
+    shell:
+        "python src/render_report_pdf.py --input {input.md} --output {output.pdf}"

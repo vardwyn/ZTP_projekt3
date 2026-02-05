@@ -1,9 +1,7 @@
 years: [2021, 2024]
 
-# Parametry obliczeń / normalizacji dla części PM2.5
-pm25:
-  daily_threshold: 15
-  max_nan_per_month: 5
+# Paramtery analizy PM2.5
+pm25_config_file: "config/pm25_details.yaml"
 
 # Parametry PubMed (NCBI Entrez)
 pubmed:
